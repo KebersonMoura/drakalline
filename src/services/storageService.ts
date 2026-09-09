@@ -1,0 +1,844 @@
+import { 
+  Appointment, 
+  ClientRecord, 
+  BlogPost, 
+  InstagramPost, 
+  Procedure, 
+  DatabaseStatus,
+  ProcedureHistoryItem,
+  HeroSlide 
+} from '../types';
+import { 
+  INITIAL_APPOINTMENTS, 
+  INITIAL_CLIENTS, 
+  INITIAL_BLOG_POSTS, 
+  INITIAL_INSTAGRAM_POSTS, 
+  INITIAL_PROCEDURES,
+  INITIAL_HERO_SLIDES,
+  CLINIC_INFO
+} from '../data/initialData';
+
+const STORAGE_KEYS = {
+  APPOINTMENTS: 'dra_kaline_appointments_v2',
+  CLIENTS: 'dra_kaline_clients_v2',
+  BLOG: 'dra_kaline_blog_v2',
+  GALLERY: 'dra_kaline_gallery_v3',
+  PROCEDURES: 'dra_kaline_procedures_v2',
+  DB_CONFIG: 'dra_kaline_db_config_v2',
+  NOTIFICATIONS: 'dra_kaline_notifications_v2',
+  DOCTOR_PHOTO: 'dra_kaline_doctor_photo_v3',
+  HERO_SLIDES: 'dra_kaline_hero_slides_v2',
+  WHATSAPP_NUMBER: 'dra_kaline_whatsapp_number_v2',
+  WHATSAPP_DISPLAY: 'dra_kaline_whatsapp_display_v2',
+};
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  type: 'appointment' | 'reminder' | 'care' | 'system';
+}
+
+class StorageService {
+  // Appointments
+  getAppointments(): Appointment[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.APPOINTMENTS);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('Error reading appointments from storage', e);
+    }
+    this.saveAppointments(INITIAL_APPOINTMENTS);
+    return INITIAL_APPOINTMENTS;
+  }
+
+  saveAppointments(appointments: Appointment[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
+    } catch (e) {
+      console.error('Error saving appointments', e);
+    }
+  }
+
+  addAppointment(appointment: Omit<Appointment, 'id' | 'createdAt' | 'status' | 'reminderSent'>): Appointment {
+    const list = this.getAppointments();
+    const newAppointment: Appointment = {
+      ...appointment,
+      id: 'apt-' + Date.now(),
+      status: 'pendente',
+      reminderSent: false,
+      createdAt: new Date().toISOString()
+    };
+    list.unshift(newAppointment);
+    this.saveAppointments(list);
+
+    // Also link or create client in the database history
+    this.autoSyncClientFromAppointment(newAppointment);
+
+    // Create in-app notification
+    this.addNotification({
+      title: 'Novo Agendamento Recebido',
+      message: `${newAppointment.clientName} agendou ${newAppointment.procedureTitle} para ${newAppointment.date} às ${newAppointment.time}.`,
+      type: 'appointment'
+    });
+
+    // Sync with MySQL backend
+    try {
+      fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAppointment)
+      }).catch(err => console.warn('Background sync with MySQL failed:', err));
+    } catch (e) {
+      // safe fallback
+    }
+
+    return newAppointment;
+  }
+
+  updateAppointmentStatus(id: string, status: Appointment['status']): Appointment | null {
+    const list = this.getAppointments();
+    const index = list.findIndex(a => a.id === id);
+    if (index === -1) return null;
+    list[index].status = status;
+    this.saveAppointments(list);
+    return list[index];
+  }
+
+  markReminderSent(id: string): void {
+    const list = this.getAppointments();
+    const index = list.findIndex(a => a.id === id);
+    if (index !== -1) {
+      list[index].reminderSent = true;
+      this.saveAppointments(list);
+    }
+  }
+
+  // Clients & Clinical History
+  getClients(): ClientRecord[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.CLIENTS);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('Error reading clients from storage', e);
+    }
+    this.saveClients(INITIAL_CLIENTS);
+    return INITIAL_CLIENTS;
+  }
+
+  saveClients(clients: ClientRecord[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.CLIENTS, JSON.stringify(clients));
+    } catch (e) {
+      console.error('Error saving clients', e);
+    }
+  }
+
+  addClient(clientData: Omit<ClientRecord, 'id' | 'createdAt' | 'totalVisits'>): ClientRecord {
+    const clients = this.getClients();
+    const newClient: ClientRecord = {
+      ...clientData,
+      id: 'cli-' + Date.now(),
+      totalVisits: clientData.history?.length || 1,
+      createdAt: new Date().toISOString()
+    };
+    clients.unshift(newClient);
+    this.saveClients(clients);
+    return newClient;
+  }
+
+  updateClient(id: string, updates: Partial<ClientRecord>): ClientRecord | null {
+    const clients = this.getClients();
+    const index = clients.findIndex(c => c.id === id);
+    if (index === -1) return null;
+    clients[index] = { ...clients[index], ...updates };
+    this.saveClients(clients);
+    return clients[index];
+  }
+
+  addProcedureToClientHistory(clientId: string, item: Omit<ProcedureHistoryItem, 'id'>): ProcedureHistoryItem | null {
+    const clients = this.getClients();
+    const client = clients.find(c => c.id === clientId);
+    if (!client) return null;
+
+    const newItem: ProcedureHistoryItem = {
+      ...item,
+      id: 'hist-' + Date.now()
+    };
+
+    if (!client.history) client.history = [];
+    client.history.unshift(newItem);
+    client.totalVisits = (client.totalVisits || 0) + 1;
+
+    this.saveClients(clients);
+    return newItem;
+  }
+
+  private autoSyncClientFromAppointment(appointment: Appointment) {
+    const clients = this.getClients();
+    const existing = clients.find(
+      c => (appointment.clientPhone && c.phone.replace(/\D/g, '') === appointment.clientPhone.replace(/\D/g, '')) ||
+           (appointment.clientEmail && c.email.toLowerCase() === appointment.clientEmail.toLowerCase())
+    );
+
+    if (existing) {
+      // Update visits
+      existing.totalVisits = (existing.totalVisits || 1) + 1;
+      this.saveClients(clients);
+    } else {
+      // Register new client
+      const newClient: ClientRecord = {
+        id: 'cli-' + Date.now(),
+        name: appointment.clientName,
+        phone: appointment.clientPhone,
+        email: appointment.clientEmail,
+        firstVisitDate: appointment.date,
+        totalVisits: 1,
+        aestheticGoals: `Interesse em ${appointment.procedureTitle}. Obs: ${appointment.notes || 'Nenhuma'}`,
+        history: [],
+        createdAt: new Date().toISOString()
+      };
+      clients.unshift(newClient);
+      this.saveClients(clients);
+    }
+  }
+
+  // Blog Posts
+  getBlogPosts(): BlogPost[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.BLOG);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('Error reading blog posts', e);
+    }
+    this.saveBlogPosts(INITIAL_BLOG_POSTS);
+    return INITIAL_BLOG_POSTS;
+  }
+
+  saveBlogPosts(posts: BlogPost[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.BLOG, JSON.stringify(posts));
+    } catch (e) {
+      console.error('Error saving blog posts', e);
+    }
+  }
+
+  addBlogPost(post: Omit<BlogPost, 'id' | 'publishedAt'>): BlogPost {
+    const posts = this.getBlogPosts();
+    const newPost: BlogPost = {
+      ...post,
+      id: 'blog-' + Date.now(),
+      publishedAt: new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+    };
+    posts.unshift(newPost);
+    this.saveBlogPosts(posts);
+    return newPost;
+  }
+
+  deleteBlogPost(id: string): void {
+    const posts = this.getBlogPosts().filter(p => p.id !== id);
+    this.saveBlogPosts(posts);
+  }
+
+  // Instagram Gallery
+  getGallery(): InstagramPost[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.GALLERY);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('Error reading gallery', e);
+    }
+    this.saveGallery(INITIAL_INSTAGRAM_POSTS);
+    return INITIAL_INSTAGRAM_POSTS;
+  }
+
+  saveGallery(gallery: InstagramPost[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.GALLERY, JSON.stringify(gallery));
+    } catch (e) {
+      console.error('Error saving gallery', e);
+    }
+  }
+
+  addGalleryPost(post: Omit<InstagramPost, 'id' | 'date'>): InstagramPost {
+    const gallery = this.getGallery();
+    const newPost: InstagramPost = {
+      ...post,
+      id: 'post-' + Date.now(),
+      date: 'Recente'
+    };
+    gallery.unshift(newPost);
+    this.saveGallery(gallery);
+    return newPost;
+  }
+
+  deleteGalleryPost(id: string): void {
+    const gallery = this.getGallery().filter(p => p.id !== id);
+    this.saveGallery(gallery);
+  }
+
+  private inMemoryDoctorPhoto: string = '';
+  private inMemoryWhatsappNumber: string = '';
+  private inMemoryWhatsappDisplay: string = '';
+
+  getWhatsappNumber(): string {
+    if (this.inMemoryWhatsappNumber) return this.inMemoryWhatsappNumber;
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.WHATSAPP_NUMBER);
+      if (data) {
+        this.inMemoryWhatsappNumber = data;
+        return data;
+      }
+    } catch (e) {
+      console.warn('Error reading whatsapp number', e);
+    }
+    return CLINIC_INFO.whatsappNumber;
+  }
+
+  getWhatsappDisplay(): string {
+    if (this.inMemoryWhatsappDisplay) return this.inMemoryWhatsappDisplay;
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.WHATSAPP_DISPLAY);
+      if (data) {
+        this.inMemoryWhatsappDisplay = data;
+        return data;
+      }
+    } catch (e) {
+      console.warn('Error reading whatsapp display', e);
+    }
+    return CLINIC_INFO.whatsappDisplay;
+  }
+
+  formatWhatsappDisplay(num: string): string {
+    const digits = num.replace(/\D/g, '');
+    if (digits.startsWith('55') && digits.length === 13) {
+      return `(${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`;
+    } else if (digits.length === 11) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+    } else if (digits.length === 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    return num;
+  }
+
+  async fetchLiveWhatsapp(): Promise<{ whatsappNumber: string; whatsappDisplay: string }> {
+    try {
+      const res = await fetch('/api/settings/whatsapp');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.whatsappNumber) {
+          this.inMemoryWhatsappNumber = data.whatsappNumber;
+          this.inMemoryWhatsappDisplay = data.whatsappDisplay || this.formatWhatsappDisplay(data.whatsappNumber);
+          try {
+            localStorage.setItem(STORAGE_KEYS.WHATSAPP_NUMBER, this.inMemoryWhatsappNumber);
+            localStorage.setItem(STORAGE_KEYS.WHATSAPP_DISPLAY, this.inMemoryWhatsappDisplay);
+          } catch {
+            // Quota fallback
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('whatsapp-updated', {
+              detail: { whatsappNumber: this.inMemoryWhatsappNumber, whatsappDisplay: this.inMemoryWhatsappDisplay }
+            }));
+          }
+          return { whatsappNumber: this.inMemoryWhatsappNumber, whatsappDisplay: this.inMemoryWhatsappDisplay };
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+    return { whatsappNumber: this.getWhatsappNumber(), whatsappDisplay: this.getWhatsappDisplay() };
+  }
+
+  saveWhatsapp(rawNumber: string, customDisplay?: string): { whatsappNumber: string; whatsappDisplay: string } {
+    const digits = rawNumber.replace(/\D/g, '');
+    let cleanNumber = digits;
+    if (digits.length === 10 || digits.length === 11) {
+      cleanNumber = '55' + digits;
+    }
+    const display = customDisplay && customDisplay.trim() 
+      ? customDisplay.trim() 
+      : this.formatWhatsappDisplay(cleanNumber);
+
+    this.inMemoryWhatsappNumber = cleanNumber;
+    this.inMemoryWhatsappDisplay = display;
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.WHATSAPP_NUMBER, cleanNumber);
+      localStorage.setItem(STORAGE_KEYS.WHATSAPP_DISPLAY, display);
+    } catch (e) {
+      console.warn('LocalStorage quota limit reached for whatsapp', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('whatsapp-updated', { 
+        detail: { whatsappNumber: cleanNumber, whatsappDisplay: display } 
+      }));
+    }
+
+    // Sync to backend
+    fetch('/api/settings/whatsapp', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ whatsappNumber: cleanNumber, whatsappDisplay: display })
+    }).catch(err => console.warn('Background sync whatsapp failed:', err));
+
+    return { whatsappNumber: cleanNumber, whatsappDisplay: display };
+  }
+
+  getDoctorPhoto(): string {
+    if (this.inMemoryDoctorPhoto) return this.inMemoryDoctorPhoto;
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.DOCTOR_PHOTO);
+      if (data) {
+        this.inMemoryDoctorPhoto = data;
+        return data;
+      }
+    } catch (e) {
+      console.warn('Error reading doctor photo', e);
+    }
+    return CLINIC_INFO.doctorPhoto;
+  }
+
+  async fetchLiveDoctorPhoto(): Promise<string> {
+    try {
+      const res = await fetch('/api/settings/photo');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.photoUrl) {
+          this.inMemoryDoctorPhoto = data.photoUrl;
+          try {
+            localStorage.setItem(STORAGE_KEYS.DOCTOR_PHOTO, data.photoUrl);
+          } catch {
+            // Quota fallback
+          }
+          return data.photoUrl;
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+    return this.getDoctorPhoto();
+  }
+
+  saveDoctorPhoto(photoUrl: string): void {
+    this.inMemoryDoctorPhoto = photoUrl;
+    try {
+      localStorage.setItem(STORAGE_KEYS.DOCTOR_PHOTO, photoUrl);
+    } catch (e) {
+      console.warn('LocalStorage quota limit reached for doctor photo, keeping in memory & syncing to backend', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('doctor-photo-updated', { detail: photoUrl }));
+    }
+
+    // Sync to MySQL backend
+    fetch('/api/settings/photo', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photoUrl })
+    }).catch(err => console.warn('Background sync doctor photo failed:', err));
+  }
+
+  updateGalleryPhoto(postId: string, imageUrl: string): void {
+    const gallery = this.getGallery();
+    const index = gallery.findIndex(p => p.id === postId);
+    if (index !== -1) {
+      gallery[index].imageUrl = imageUrl;
+      this.saveGallery(gallery);
+      if (postId === 'post-1') {
+        this.saveDoctorPhoto(imageUrl);
+      }
+    }
+  }
+
+  // Database Connection Configuration
+  async fetchLiveDatabaseStatus(): Promise<DatabaseStatus> {
+    try {
+      const res = await fetch('/api/database/status');
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.config) {
+          const liveConfig: DatabaseStatus = {
+            connected: json.config.connected,
+            provider: json.config.provider,
+            connectionStringMasked: json.config.connectionStringMasked,
+            host: json.config.host,
+            database: json.config.database,
+            lastSync: json.config.lastSync || new Date().toISOString(),
+            recordsCount: {
+              clients: json.config.recordsCount?.clients || this.getClients().length,
+              appointments: json.config.recordsCount?.appointments || this.getAppointments().length,
+              posts: json.config.recordsCount?.posts || this.getBlogPosts().length,
+              gallery: json.config.recordsCount?.gallery || this.getGallery().length,
+              procedures: json.config.recordsCount?.procedures,
+              testimonials: json.config.recordsCount?.testimonials,
+              notifications: json.config.recordsCount?.notifications,
+              history: json.config.recordsCount?.history
+            },
+            allTables: json.config.allTables
+          };
+          localStorage.setItem(STORAGE_KEYS.DB_CONFIG, JSON.stringify(liveConfig));
+          return liveConfig;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch live database status from API, using cached state', e);
+    }
+    return this.getDatabaseConfig();
+  }
+
+  getDatabaseConfig(): DatabaseStatus {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.DB_CONFIG);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('Error reading db config', e);
+    }
+    return {
+      connected: true,
+      provider: 'MySQL Cloud / Externo',
+      host: '69.49.241.41',
+      database: 'kebers41_dra_kalline',
+      connectionStringMasked: 'mysql://kebers41_kebers41:***@69.49.241.41:3306/kebers41_dra_kalline',
+      recordsCount: {
+        clients: this.getClients().length,
+        appointments: this.getAppointments().length,
+        posts: this.getBlogPosts().length,
+        gallery: this.getGallery().length
+      }
+    };
+  }
+
+  saveDatabaseConfig(connectionString: string): DatabaseStatus {
+    const isMysql = connectionString.includes('mysql') || connectionString.includes('kebers41');
+    const status: DatabaseStatus = {
+      connected: true,
+      provider: isMysql ? 'MySQL Cloud / Externo' : 'PostgreSQL (Cloud / Externo)',
+      connectionStringMasked: connectionString.replace(/:\/\/.*@/, '://***:***@'),
+      host: '69.49.241.41',
+      database: 'kebers41_dra_kalline',
+      lastSync: new Date().toISOString(),
+      recordsCount: {
+        clients: this.getClients().length,
+        appointments: this.getAppointments().length,
+        posts: this.getBlogPosts().length,
+        gallery: this.getGallery().length
+      }
+    };
+    try {
+      localStorage.setItem(STORAGE_KEYS.DB_CONFIG, JSON.stringify(status));
+    } catch (e) {
+      console.error('Error saving db config', e);
+    }
+    return status;
+  }
+
+  // Notifications
+  getNotifications(): AppNotification[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('Error reading notifications', e);
+    }
+    return [
+      {
+        id: 'notif-1',
+        title: 'Bem-vinda à Clínica Dra. Kaline',
+        message: 'Agende sua avaliação facial e ative suas notificações para lembretes automáticos.',
+        timestamp: new Date().toISOString(),
+        read: false,
+        type: 'system'
+      }
+    ];
+  }
+
+  addNotification(notif: Omit<AppNotification, 'id' | 'timestamp' | 'read'>): AppNotification {
+    const list = this.getNotifications();
+    const newNotif: AppNotification = {
+      ...notif,
+      id: 'notif-' + Date.now(),
+      timestamp: new Date().toISOString(),
+      read: false
+    };
+    list.unshift(newNotif);
+    try {
+      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(list));
+    } catch (e) {
+      console.error('Error saving notifications', e);
+    }
+    return newNotif;
+  }
+
+  markAllNotificationsRead(): void {
+    const list = this.getNotifications().map(n => ({ ...n, read: true }));
+    try {
+      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(list));
+    } catch (e) {
+      console.error('Error marking notifications read', e);
+    }
+  }
+
+  // Procedures (Cuidados & Procedimentos / Tratamentos)
+  private inMemoryProcedures: Procedure[] | null = null;
+
+  getProcedures(): Procedure[] {
+    if (this.inMemoryProcedures !== null) {
+      return this.inMemoryProcedures;
+    }
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.PROCEDURES);
+      if (data !== null) {
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed)) {
+          this.inMemoryProcedures = parsed;
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Error reading procedures from storage', e);
+    }
+    this.inMemoryProcedures = INITIAL_PROCEDURES;
+    this.saveProcedures(INITIAL_PROCEDURES);
+    return INITIAL_PROCEDURES;
+  }
+
+  saveProcedures(procedures: Procedure[]): void {
+    this.inMemoryProcedures = procedures;
+    try {
+      localStorage.setItem(STORAGE_KEYS.PROCEDURES, JSON.stringify(procedures));
+    } catch (e) {
+      console.warn('LocalStorage quota limit reached when saving procedures:', e);
+      try {
+        const lightweight = procedures.map(p => ({
+          ...p,
+          imageUrl: (p.imageUrl?.startsWith('data:') && p.imageUrl.length > 1000)
+            ? 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80'
+            : p.imageUrl
+        }));
+        localStorage.setItem(STORAGE_KEYS.PROCEDURES, JSON.stringify(lightweight));
+      } catch (inner) {
+        // Safe silence: in-memory state holds full procedures
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('procedures-updated', { detail: procedures }));
+    }
+  }
+
+  async fetchLiveProcedures(): Promise<Procedure[]> {
+    try {
+      const res = await fetch('/api/procedures');
+      if (res.ok) {
+        const liveProcedures = await res.json();
+        if (Array.isArray(liveProcedures)) {
+          this.inMemoryProcedures = liveProcedures;
+          this.saveProcedures(liveProcedures);
+          return liveProcedures;
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching live procedures from API', e);
+    }
+    return this.getProcedures();
+  }
+
+  async updateProcedure(id: string, updates: Partial<Procedure>): Promise<Procedure | null> {
+    const list = [...this.getProcedures()];
+    const index = list.findIndex(p => p.id === id);
+    if (index === -1) return null;
+
+    const updatedProc: Procedure = {
+      ...list[index],
+      ...updates
+    };
+    list[index] = updatedProc;
+    this.saveProcedures(list);
+
+    // Sync to MySQL backend
+    try {
+      await fetch(`/api/procedures/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+    } catch (e) {
+      console.warn('Could not sync procedure update to backend:', e);
+    }
+
+    return updatedProc;
+  }
+
+  async addProcedure(procData: Omit<Procedure, 'id'>): Promise<Procedure> {
+    const list = [...this.getProcedures()];
+    const newId = 'proc-' + Date.now();
+    const newProc: Procedure = {
+      ...procData,
+      id: newId
+    };
+    list.push(newProc);
+    this.saveProcedures(list);
+
+    // Sync to MySQL backend
+    try {
+      await fetch('/api/procedures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProc)
+      });
+    } catch (e) {
+      console.warn('Could not sync new procedure to backend:', e);
+    }
+
+    return newProc;
+  }
+
+  async deleteProcedure(id: string): Promise<boolean> {
+    const list = this.getProcedures().filter(p => p.id !== id);
+    this.saveProcedures(list);
+
+    try {
+      const res = await fetch(`/api/procedures/${id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.procedures)) {
+          this.saveProcedures(data.procedures);
+        }
+      }
+      return true;
+    } catch (e) {
+      console.warn('Could not delete procedure from backend:', e);
+      return true;
+    }
+  }
+
+  private inMemoryHeroSlides: HeroSlide[] = [];
+
+  // Hero Slides Carousel (Top Banner)
+  getHeroSlides(): HeroSlide[] {
+    if (this.inMemoryHeroSlides && this.inMemoryHeroSlides.length > 0) {
+      return this.inMemoryHeroSlides;
+    }
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.HERO_SLIDES);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.inMemoryHeroSlides = parsed;
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Error reading hero slides', e);
+    }
+    this.inMemoryHeroSlides = INITIAL_HERO_SLIDES;
+    this.saveHeroSlides(INITIAL_HERO_SLIDES);
+    return INITIAL_HERO_SLIDES;
+  }
+
+  saveHeroSlides(slides: HeroSlide[]): void {
+    this.inMemoryHeroSlides = slides;
+    try {
+      localStorage.setItem(STORAGE_KEYS.HERO_SLIDES, JSON.stringify(slides));
+    } catch (e) {
+      console.warn('LocalStorage quota limit reached when saving slides, attempting lightweight cache:', e);
+      try {
+        // Fallback: strip any oversized data URLs so metadata can still be cached
+        const lightweight = slides.map(s => ({
+          ...s,
+          imageUrl: (s.imageUrl?.startsWith('data:') && s.imageUrl.length > 1000)
+            ? 'https://images.unsplash.com/photo-1594824813589-32e6a715f5f3?auto=format&fit=crop&w=1400&q=85'
+            : s.imageUrl
+        }));
+        localStorage.setItem(STORAGE_KEYS.HERO_SLIDES, JSON.stringify(lightweight));
+      } catch (inner) {
+        // Safe silence: in-memory state & backend MySQL hold the complete slides
+      }
+    }
+    window.dispatchEvent(new CustomEvent('hero-slides-updated', { detail: slides }));
+  }
+
+  async fetchLiveHeroSlides(): Promise<HeroSlide[]> {
+    try {
+      const res = await fetch('/api/slides');
+      if (res.ok) {
+        const liveSlides = await res.json();
+        if (Array.isArray(liveSlides) && liveSlides.length > 0) {
+          this.inMemoryHeroSlides = liveSlides;
+          this.saveHeroSlides(liveSlides);
+          return liveSlides;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend /api/slides unavailable, using local cache', e);
+    }
+    return this.getHeroSlides();
+  }
+
+  async saveHeroSlideLive(slide: Omit<HeroSlide, 'id'> & { id?: string }): Promise<HeroSlide> {
+    try {
+      const res = await fetch('/api/slides', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(slide)
+      });
+      if (res.ok) {
+        const created = await res.json();
+        const current = this.getHeroSlides();
+        current.push(created);
+        this.saveHeroSlides(current);
+        return created;
+      }
+    } catch (e) {
+      console.warn('Error creating slide in backend, saving locally', e);
+    }
+
+    // Local fallback
+    const fallbackSlide: HeroSlide = {
+      ...slide,
+      id: 'slide-' + Date.now(),
+      isActive: slide.isActive !== false,
+      order: slide.order ?? 99
+    };
+    const current = this.getHeroSlides();
+    current.push(fallbackSlide);
+    this.saveHeroSlides(current);
+    return fallbackSlide;
+  }
+
+  async updateHeroSlideLive(id: string, slideData: Partial<HeroSlide>): Promise<void> {
+    try {
+      await fetch(`/api/slides/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(slideData)
+      });
+    } catch (e) {
+      console.warn('Error updating slide in backend', e);
+    }
+
+    const current = this.getHeroSlides().map(s => s.id === id ? { ...s, ...slideData } : s);
+    this.saveHeroSlides(current);
+  }
+
+  async deleteHeroSlideLive(id: string): Promise<void> {
+    try {
+      await fetch(`/api/slides/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {
+      console.warn('Error deleting slide in backend', e);
+    }
+
+    const current = this.getHeroSlides().filter(s => s.id !== id);
+    this.saveHeroSlides(current);
+  }
+}
+
+export const storageService = new StorageService();

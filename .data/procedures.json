@@ -1,0 +1,126 @@
+[
+  {
+    "id": "transplante-capilar",
+    "title": "Transplante Capilar (Técnica FUE)",
+    "subtitle": "Restauração definitiva com aspecto natural e preservação da área doadora",
+    "description": "Cirurgia de restauração capilar minimamente invasiva onde os folículos são extraídos individualmente e implantados respeitando o ângulo, densidade e linha frontal natural do paciente.",
+    "category": "facial",
+    "duration": "Procedimento de 6 a 8 horas",
+    "downtime": "Retorno às atividades leves em 3 a 5 dias",
+    "idealFor": [
+      "Calvície masculina e feminina avançada",
+      "Recuo da linha capilar e entradas",
+      "Falhas na barba ou sobrancelhas",
+      "Cicatrizes no couro cabeludo"
+    ],
+    "benefits": [
+      "Cabelos definitivos e naturais",
+      "Sem cicatriz linear visível (técnica FUE fio a fio)",
+      "Linha anterior projetada com naturalidade anatômica",
+      "Acompanhamento pré e pós-operatório completo"
+    ],
+    "imageUrl": "/uploads/img_1788916066009_01caty.jpg",
+    "popular": true,
+    "faq": [
+      {
+        "answer": "Os folículos retirados da área doadora posterior são geneticamente resistentes à calvície e permanecem crescendo ao longo da vida.",
+        "question": "O cabelo transplantado volta a cair?"
+      },
+      {
+        "answer": "Os fios começam a nascer a partir do 3º mês, com resultado maduro e denso entre 9 e 12 meses.",
+        "question": "Quando vejo os primeiros resultados?"
+      }
+    ]
+  },
+  {
+    "id": "tricoscopia-digital",
+    "title": "Tricoscopia Digital & Diagnóstico Capilar",
+    "subtitle": "Exame de alta precisão para identificar as reais causas da queda capilar",
+    "description": "Avaliação dermatoscópica computadorizada dos fios e couro cabeludo. Permite analisar densidade folicular, espessura dos fios, sinais inflamatórios e miniaturização, viabilizando um diagnóstico preciso.",
+    "category": "facial",
+    "duration": "60 minutos",
+    "downtime": "Sem downtime (exame não invasivo)",
+    "idealFor": [
+      "Queda acentuada de cabelo",
+      "Afinamento dos fios e entradas",
+      "Suspeita de calvície (alopecia)",
+      "Descamação, dor ou coceira no couro cabeludo"
+    ],
+    "benefits": [
+      "Diagnóstico médico preciso e precoce",
+      "Mapeamento fotográfico para acompanhamento de evolução",
+      "Identificação da causa raiz da queda capilar",
+      "Direcionamento de tratamento personalizado"
+    ],
+    "imageUrl": "/uploads/img_1788916017343_h9k7ld.jpg",
+    "popular": true,
+    "faq": [
+      {
+        "answer": "Com uma lente de aumento dermatoscópica digital conectada ao monitor, avaliamos folículo a folículo em alta ampliação de forma indolor.",
+        "question": "Como é feita a tricoscopia?"
+      },
+      {
+        "answer": "Recomendamos estar com os cabelos limpos e sem uso de produtos tópicos ou maquiagens capilares no dia da consulta.",
+        "question": "Preciso de preparo antes do exame?"
+      }
+    ]
+  },
+  {
+    "id": "mmp-capilar",
+    "title": "MMP® Capilar & Microinfusão de Medicamentos",
+    "subtitle": "Aplicação direta de ativos estéreis na raiz do folículo piloso",
+    "description": "Técnica médica que utiliza microagulhamento controlado para infundir fatores de crescimento, vitaminas e medicações específicas diretamente na derme onde se localizam as raízes dos fios.",
+    "category": "rejuvenescimento",
+    "duration": "45 minutos",
+    "downtime": "Sem repouso (lavagem liberada em 24h)",
+    "idealFor": [
+      "Alopécia androgenética (calvície)",
+      "Eflúvio telógeno persistente",
+      "Fios enfraquecidos e desvitalizados",
+      "Estímulo pré e pós-transplante"
+    ],
+    "benefits": [
+      "Ação direta no bulbo capilar com alta absorção",
+      "Freia a queda e estimula novos fios em crescimento",
+      "Espessamento do calibre da haste capilar",
+      "Procedimento realizado com anestesia local confortável"
+    ],
+    "imageUrl": "/uploads/img_1788916131091_53i2pc.jpg",
+    "popular": true,
+    "faq": [
+      {
+        "answer": "Em média de 3 a 6 sessões mensais, ajustadas de acordo com o diagnóstico na tricoscopia.",
+        "question": "Quantas sessões são indicadas?"
+      }
+    ]
+  },
+  {
+    "id": "terapia-laser",
+    "title": "Fotobioestimulação & Lasers Capilares",
+    "subtitle": "Energia luminosa para ativar a circulação e metabolismo folicular",
+    "description": "Uso de luzes e lasers de baixa intensidade (LLLT) para aumentar a oxigenação celular no couro cabeludo, reduzir a inflamação folicular e acelerar a transição dos fios para a fase de crescimento.",
+    "category": "rejuvenescimento",
+    "duration": "30 minutos",
+    "downtime": "Zero (indolor e relaxante)",
+    "idealFor": [
+      "Queda pós-estresse ou pós-parto",
+      "Dermatite seborreica do couro cabeludo",
+      "Recuperação pós-cirúrgica capilar",
+      "Potencialização de tratamentos clínicos"
+    ],
+    "benefits": [
+      "Estímulo da microcirculação local",
+      "Ação anti-inflamatória no couro cabeludo",
+      "Melhora a nutrição e brilho dos fios",
+      "Indolor e sem agulhas"
+    ],
+    "imageUrl": "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&w=800&q=80",
+    "popular": false,
+    "faq": [
+      {
+        "answer": "Sim, é altamente sinérgico quando combinado com MMP® e terapia medicamentosa oral/tópica.",
+        "question": "Pode ser associado a outros tratamentos?"
+      }
+    ]
+  }
+]

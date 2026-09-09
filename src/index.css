@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sand: #f4f3eb;
+  --color-clay: #aa907d;
+  --color-stone-sand: #c9bcad;
+  --color-taupe: #ada49c;
+  --color-sage: #a4a49c;
+}
+
+:root {
+  --bg-sand: #f4f3eb;
+  --color-clay: #aa907d;
+  --color-stone-sand: #c9bcad;
+  --color-taupe: #ada49c;
+  --color-sage: #a4a49c;
+}
+
+body {
+  background-color: #f4f3eb;
+  color: #3b3530;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}

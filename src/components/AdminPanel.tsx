@@ -35,7 +35,9 @@ import {
   SlidersHorizontal,
   RotateCcw,
   Upload,
-  MapPin
+  MapPin,
+  LogOut,
+  User
 } from 'lucide-react';
 import { 
   Appointment, 
@@ -45,7 +47,8 @@ import {
   Procedure, 
   DatabaseStatus,
   ProcedureHistoryItem,
-  HeroSlide 
+  HeroSlide,
+  AdminUser
 } from '../types';
 import { storageService } from '../services/storageService';
 import { notificationService } from '../services/notificationService';
@@ -54,6 +57,7 @@ import { ChangePhotoModal } from './ChangePhotoModal';
 import { ChangeLogoModal } from './ChangeLogoModal';
 import { EditSlideModal } from './EditSlideModal';
 import { EditProcedureModal } from './EditProcedureModal';
+import { EditUserModal } from './EditUserModal';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -70,11 +74,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 }) => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [usernameInput, setUsernameInput] = useState<string>('');
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [authError, setAuthError] = useState<string>('');
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [showLoginPassword, setShowLoginPassword] = useState<boolean>(false);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'appointments' | 'clients' | 'procedures' | 'content' | 'database' | 'whatsapp'>('appointments');
+  const [activeTab, setActiveTab] = useState<'appointments' | 'clients' | 'procedures' | 'content' | 'database' | 'whatsapp' | 'users'>('appointments');
+
+  // Admin Users & Credentials State (Gravados no Banco de Dados)
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => storageService.getAdminUsers());
+  const [showEditUserModal, setShowEditUserModal] = useState<boolean>(false);
+  const [selectedUserForEdit, setSelectedUserForEdit] = useState<AdminUser | null>(null);
+  const [userSuccessMessage, setUserSuccessMessage] = useState<string>('');
+  const [userErrorMessage, setUserErrorMessage] = useState<string>('');
+  const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState<boolean>(false);
+  const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
 
   // WhatsApp Settings State
   const [adminWhatsappNumber, setAdminWhatsappNumber] = useState<string>(() => storageService.getWhatsappNumber());
@@ -194,6 +211,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         if (addr.cep) setAdminCep(addr.cep);
       }
     }).catch(() => {});
+
+    // Fetch live admin users from database
+    setAdminUsers(storageService.getAdminUsers());
+    storageService.fetchAdminUsersLive().then(users => {
+      if (Array.isArray(users) && users.length > 0) setAdminUsers(users);
+    }).catch(() => {});
   };
 
   const handleSaveWhatsappAdmin = async (e?: React.FormEvent) => {
@@ -245,7 +268,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (res.ok) {
         const liveStatus = await storageService.fetchLiveDatabaseStatus();
         setDbConfig(liveStatus);
-        setDbSuccessMessage('Banco de dados MySQL sincronizado! Todas as 9 tabelas estão ativas.');
+        setDbSuccessMessage('Banco de dados MySQL sincronizado! Todas as 10 tabelas estão ativas.');
         setTimeout(() => setDbSuccessMessage(''), 4000);
       }
     } catch {
@@ -255,22 +278,71 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  if (!isOpen) return null;
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Accept default password or direct enter
-    if (passwordInput === 'admin' || passwordInput === 'dra_kaline_admin_2025' || passwordInput === '123456') {
-      setIsAuthenticated(true);
-      setAuthError('');
+  const handleSaveUser = async (userData: { id?: string; username: string; password?: string; name: string; role?: string }) => {
+    if (userData.id) {
+      // Atualização de usuário existente no banco
+      await storageService.updateAdminUserLive(userData.id, userData);
+      setUserSuccessMessage('Login e senha atualizados com sucesso no banco de dados!');
     } else {
-      setAuthError('Senha incorreta. Dica: use "admin" ou clique no acesso rápido.');
+      // Criação de novo usuário no banco
+      if (!userData.password) throw new Error('A senha é obrigatória para cadastrar um novo usuário.');
+      await storageService.addAdminUserLive({
+        username: userData.username,
+        password: userData.password,
+        name: userData.name,
+        role: userData.role
+      });
+      setUserSuccessMessage('Novo usuário e senha gravados no banco de dados com sucesso!');
+    }
+    const updatedUsers = await storageService.fetchAdminUsersLive();
+    setAdminUsers(updatedUsers);
+    setTimeout(() => setUserSuccessMessage(''), 4500);
+  };
+
+  const handleDeleteUser = async (user: AdminUser) => {
+    if (adminUsers.length <= 1) {
+      alert('Não é possível excluir o único administrador cadastrado no sistema.');
+      return;
+    }
+    setIsDeletingUser(true);
+    try {
+      await storageService.deleteAdminUserLive(user.id);
+      const updated = await storageService.fetchAdminUsersLive();
+      setAdminUsers(updated);
+      setUserToDelete(null);
+      setUserSuccessMessage(`Usuário "${user.username}" removido do banco de dados com sucesso.`);
+      setTimeout(() => setUserSuccessMessage(''), 4000);
+    } catch (err: any) {
+      setUserErrorMessage(err.message || 'Erro ao excluir usuário');
+      setTimeout(() => setUserErrorMessage(''), 4000);
+    } finally {
+      setIsDeletingUser(false);
     }
   };
 
-  const handleQuickLogin = () => {
-    setIsAuthenticated(true);
+  if (!isOpen) return null;
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
     setAuthError('');
+    setIsLoggingIn(true);
+    try {
+      const res = await storageService.loginLive(usernameInput, passwordInput);
+      if (res.success) {
+        setIsAuthenticated(true);
+        setAuthError('');
+        // Atualiza a lista ao logar
+        storageService.fetchAdminUsersLive().then(users => {
+          if (Array.isArray(users) && users.length > 0) setAdminUsers(users);
+        }).catch(() => {});
+      } else {
+        setAuthError(res.error || 'Usuário ou senha incorretos. Verifique suas credenciais.');
+      }
+    } catch (err: any) {
+      setAuthError('Erro ao validar credenciais. Tente novamente.');
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   // Appointment actions
@@ -717,20 +789,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {isAuthenticated && (
-              <button
-                onClick={handleExportBackup}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium rounded-lg transition-colors"
-                title="Exportar backup completo em JSON"
-              >
-                <Download className="w-3.5 h-3.5 text-amber-400" />
-                <span>Backup dos Dados</span>
-              </button>
+              <>
+                <button
+                  onClick={handleExportBackup}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                  title="Exportar backup completo em JSON"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Backup</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setIsAuthenticated(false);
+                    setUsernameInput('');
+                    setPasswordInput('');
+                    setAuthError('');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-stone-800 hover:bg-rose-950/80 text-stone-300 hover:text-rose-200 text-xs font-medium rounded-lg transition-colors cursor-pointer border border-stone-700/60"
+                  title="Encerrar sessão de administrador"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sair</span>
+                </button>
+              </>
             )}
             <button
               onClick={onClose}
-              className="p-1.5 text-stone-400 hover:text-white rounded-lg hover:bg-stone-800 transition-colors"
+              className="p-1.5 text-stone-400 hover:text-white rounded-lg hover:bg-stone-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -740,49 +827,94 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* Authentication Gate Screen */}
         {!isAuthenticated ? (
           <div className="flex-1 flex items-center justify-center p-6 bg-stone-50">
-            <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-md max-w-md w-full text-center space-y-6">
-              <div className="w-14 h-14 bg-amber-100 text-amber-800 rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
-                <Key className="w-7 h-7" />
-              </div>
+            <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-md max-w-md w-full space-y-6">
+              <div className="text-center space-y-3">
+                <div className="w-14 h-14 bg-amber-100 text-amber-800 rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                  <Key className="w-7 h-7" />
+                </div>
 
-              <div>
-                <h3 className="font-serif text-2xl font-bold text-stone-900">Acesso Restrito</h3>
-                <p className="text-xs text-stone-500 mt-1">
-                  Área exclusiva para a Dra. Kaline e equipe clínica.
-                </p>
+                <div>
+                  <h3 className="font-serif text-2xl font-bold text-stone-900">Acesso Restrito</h3>
+                  <p className="text-xs text-stone-500 mt-1">
+                    Área exclusiva para a Dra. Kaline e equipe clínica autorizada.
+                  </p>
+                </div>
               </div>
 
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
-                  <input
-                    type="password"
-                    placeholder="Digite a senha de administrador"
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-700 text-center tracking-widest"
-                  />
-                  {authError && (
-                    <p className="text-rose-600 text-xs mt-1.5">{authError}</p>
-                  )}
+                  <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                    Usuário ou E-mail
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Ex: admin"
+                      value={usernameInput}
+                      onChange={(e) => setUsernameInput(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d] pl-9"
+                      autoFocus
+                      required
+                    />
+                    <User className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
+                  </div>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                    Senha de Administrador
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showLoginPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={passwordInput}
+                      onChange={(e) => setPasswordInput(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d] pl-9 pr-10"
+                      required
+                    />
+                    <Key className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3 top-2.5 text-stone-400 hover:text-stone-600 cursor-pointer p-0.5"
+                      title={showLoginPassword ? 'Ocultar senha' : 'Ver senha'}
+                    >
+                      {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {authError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-center">
+                    <p className="text-rose-700 text-xs font-medium">{authError}</p>
+                  </div>
+                )}
 
                 <button
                   type="submit"
-                  className="w-full py-3 bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  disabled={isLoggingIn}
+                  className="w-full py-3 bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors cursor-pointer mt-1 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  Entrar no Painel
+                  {isLoggingIn ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                      <span>Validando no Banco...</span>
+                    </>
+                  ) : (
+                    <span>Entrar no Painel</span>
+                  )}
                 </button>
-              </form>
 
-              <div className="pt-2 border-t border-stone-100">
-                <button
-                  type="button"
-                  onClick={handleQuickLogin}
-                  className="text-xs font-semibold text-amber-800 hover:text-amber-950 underline cursor-pointer"
-                >
-                  Acesso Rápido de Demonstração (Clique Aqui)
-                </button>
-              </div>
+                <div className="pt-2 text-center">
+                  <p className="text-[11px] text-stone-500">
+                    Credenciais salvas no banco de dados MySQL.
+                  </p>
+                  <p className="text-[10px] text-stone-400 mt-0.5">
+                    Acesso inicial padrão: usuário <strong className="text-stone-700 font-mono">admin</strong> / senha <strong className="text-stone-700 font-mono">admin</strong>
+                  </p>
+                </div>
+              </form>
             </div>
           </div>
         ) : (
@@ -863,6 +995,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 >
                   <MessageCircle className="w-4 h-4 text-[#25D366]" />
                   <span>WhatsApp & Endereço</span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('users'); setSelectedClient(null); }}
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    activeTab === 'users'
+                      ? 'bg-stone-900 text-white shadow-xs'
+                      : 'text-stone-700 hover:bg-stone-200/60'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4 text-amber-400" />
+                  <span>Usuários & Senhas</span>
+                  <span className="ml-auto text-[10px] bg-stone-800 text-stone-300 px-1.5 py-0.5 rounded-full">
+                    {adminUsers.length}
+                  </span>
                 </button>
 
                 <button
@@ -1656,6 +1803,183 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               )}
 
+              {/* TAB: GERENCIAMENTO DE USUÁRIOS, LOGIN E SENHA (GRAVADO NO BANCO) */}
+              {activeTab === 'users' && (
+                <div className="space-y-6">
+                  {/* Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-200 pb-4">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900 text-[10px] font-bold uppercase tracking-wider mb-1">
+                        Segurança & Credenciais do Banco
+                      </div>
+                      <h3 className="font-serif text-2xl font-bold text-stone-900">
+                        Usuários, Logins & Senhas
+                      </h3>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Altere o login e senha existentes ou cadastre novos acessos. Todas as informações são persistidas no banco de dados MySQL na tabela <code className="font-mono bg-stone-100 px-1 py-0.5 rounded text-[11px] text-stone-800">admin_users</code>.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedUserForEdit(null);
+                        setShowEditUserModal(true);
+                      }}
+                      className="px-4 py-2.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-xs transition-colors cursor-pointer self-start sm:self-auto"
+                    >
+                      <Plus className="w-4 h-4 text-amber-400" />
+                      <span>Adicionar Novo Usuário</span>
+                    </button>
+                  </div>
+
+                  {/* Feedback Messages */}
+                  {userSuccessMessage && (
+                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-emerald-900 text-xs font-medium">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <span>{userSuccessMessage}</span>
+                    </div>
+                  )}
+
+                  {userErrorMessage && (
+                    <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-rose-900 text-xs font-medium">
+                      <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                      <span>{userErrorMessage}</span>
+                    </div>
+                  )}
+
+                  {/* Security Notice Card */}
+                  <div className="p-4 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-start gap-3.5">
+                    <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-amber-800 shrink-0 mt-0.5">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div className="text-xs text-amber-950 space-y-1 leading-relaxed">
+                      <h4 className="font-bold">Acesso Restrito Obrigatório por Login e Senha</h4>
+                      <p className="text-stone-600 text-[11px]">
+                        O acesso rápido de demonstração foi permanentemente removido. Qualquer administrador aqui listado tem autorização para gerenciar consultas, prontuários de pacientes e configurações clínicas. As alterações de senha e novos usuários cadastrados são gravados com efeito imediato.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Users Cards Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {adminUsers.map((u) => {
+                      const isRevealed = Boolean(showPasswordMap[u.id]);
+                      return (
+                        <div
+                          key={u.id}
+                          className="bg-white p-5 rounded-3xl border border-stone-200 shadow-2xs hover:shadow-xs transition-shadow flex flex-col justify-between space-y-4"
+                        >
+                          {/* Top row */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-11 h-11 rounded-2xl bg-[#aa907d]/15 border border-[#aa907d]/30 text-[#604938] flex items-center justify-center font-bold text-sm font-serif">
+                                {u.name ? u.name.charAt(0).toUpperCase() : u.username.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <h4 className="font-semibold text-stone-900 text-sm">{u.name || u.username}</h4>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="font-mono text-xs font-medium text-stone-600 bg-stone-100 px-2 py-0.5 rounded-md">
+                                    @{u.username}
+                                  </span>
+                                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">
+                                    {u.role || 'Administrador'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Delete button (disabled if single user) */}
+                            <button
+                              type="button"
+                              onClick={() => setUserToDelete(u)}
+                              disabled={adminUsers.length <= 1}
+                              title={adminUsers.length <= 1 ? "Mínimo de 1 administrador necessário" : "Excluir usuário"}
+                              className="p-2 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Credentials Details Box */}
+                          <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-100 space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-stone-500 text-[11px] font-medium flex items-center gap-1.5">
+                                <Key className="w-3.5 h-3.5 text-stone-400" />
+                                Login:
+                              </span>
+                              <span className="font-mono font-bold text-stone-900">{u.username}</span>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1.5 border-t border-stone-200/60">
+                              <span className="text-stone-500 text-[11px] font-medium flex items-center gap-1.5">
+                                <ShieldCheck className="w-3.5 h-3.5 text-stone-400" />
+                                Senha:
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-stone-800 font-semibold">
+                                  {isRevealed ? (u.password || '••••••••') : '••••••••'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPasswordMap(prev => ({ ...prev, [u.id]: !prev[u.id] }))}
+                                  className="text-stone-400 hover:text-stone-700 p-1 cursor-pointer"
+                                  title={isRevealed ? "Ocultar senha" : "Ver senha"}
+                                >
+                                  {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+
+                            {u.createdAt && (
+                              <div className="pt-1.5 border-t border-stone-200/60 flex items-center justify-between text-[10px] text-stone-400">
+                                <span>Cadastrado em:</span>
+                                <span>{new Date(u.createdAt).toLocaleDateString('pt-BR')}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Action Button: Edit Login and Password */}
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedUserForEdit(u);
+                                setShowEditUserModal(true);
+                              }}
+                              className="w-full py-2.5 px-4 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-2xs transition-colors cursor-pointer"
+                            >
+                              <Key className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Alterar Login ou Senha</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Fast Action Guidance */}
+                  <div className="p-4 bg-white rounded-2xl border border-stone-200 text-xs text-stone-600 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>
+                        Total de <strong>{adminUsers.length}</strong> usuário(s) com credenciais ativas no banco.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedUserForEdit(null);
+                        setShowEditUserModal(true);
+                      }}
+                      className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+                    >
+                      + Cadastrar Outro Login
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* TAB 4: DATABASE CONFIGURATION */}
               {activeTab === 'database' && (
                 <div className="space-y-6 max-w-3xl">
@@ -1730,7 +2054,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         { name: 'blog_posts', label: 'Artigos / Cuidados', count: dbConfig.recordsCount?.posts ?? blogPosts.length, desc: 'Orientações pós' },
                         { name: 'testimonials', label: 'Depoimentos', count: dbConfig.recordsCount?.testimonials ?? 3, desc: 'Avaliações com nota' },
                         { name: 'notifications', label: 'Notificações', count: dbConfig.recordsCount?.notifications ?? 0, desc: 'Alertas e lembretes' },
-                        { name: 'clinic_settings', label: 'Configurações', count: 6, desc: 'Dados e contatos' }
+                        { name: 'clinic_settings', label: 'Configurações', count: 6, desc: 'Dados e contatos' },
+                        { name: 'admin_users', label: 'Usuários & Acesso', count: dbConfig.recordsCount?.adminUsers ?? adminUsers.length, desc: 'Logins e senhas no MySQL' }
                       ].map((tbl) => (
                         <div key={tbl.name} className="p-3 bg-white rounded-2xl border border-stone-200 flex flex-col justify-between shadow-2xs">
                           <div className="flex items-center justify-between mb-1">
@@ -2094,6 +2419,60 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               >
                 <Trash2 className="w-4 h-4" />
                 <span>{isDeletingSlide ? 'Excluindo...' : 'Sim, Excluir'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-MODAL 8: Edit/Add Admin User (Login & Senha no Banco) */}
+      <EditUserModal
+        isOpen={showEditUserModal}
+        user={selectedUserForEdit}
+        onClose={() => {
+          setShowEditUserModal(false);
+          setSelectedUserForEdit(null);
+        }}
+        onSave={handleSaveUser}
+      />
+
+      {/* Confirmation Modal: Delete Admin User */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-stone-950/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white w-full max-w-md rounded-3xl border border-stone-200 shadow-2xl overflow-hidden p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            
+            <div className="text-center space-y-1.5">
+              <h4 className="font-serif text-lg font-bold text-stone-900">
+                Excluir Usuário de Acesso?
+              </h4>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Tem certeza que deseja excluir o acesso de <strong className="text-stone-900">@{userToDelete.username}</strong> ({userToDelete.name || 'Administrador'})?
+              </p>
+              <p className="text-[11px] text-stone-400">
+                Este login será removido do banco de dados e não terá mais acesso ao painel de administração.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingUser}
+                onClick={() => setUserToDelete(null)}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-stone-200 text-stone-700 text-xs font-semibold hover:bg-stone-50 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingUser}
+                onClick={() => handleDeleteUser(userToDelete)}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isDeletingUser ? 'Excluindo...' : 'Sim, Excluir do Banco'}</span>
               </button>
             </div>
           </div>

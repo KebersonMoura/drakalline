@@ -123,6 +123,7 @@ export interface DatabaseStatus {
     testimonials?: number;
     notifications?: number;
     history?: number;
+    adminUsers?: number;
   };
   allTables?: Record<string, number>;
 }
@@ -141,4 +142,14 @@ export interface HeroSlide {
   order: number;
   isActive: boolean;
   createdAt?: string;
+}
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  password?: string;
+  name: string;
+  role: 'Administrador' | 'Médica' | 'Recepção' | string;
+  createdAt?: string;
+  updatedAt?: string;
 }

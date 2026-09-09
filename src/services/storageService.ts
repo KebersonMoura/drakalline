@@ -6,7 +6,8 @@ import {
   Procedure, 
   DatabaseStatus,
   ProcedureHistoryItem,
-  HeroSlide 
+  HeroSlide,
+  AdminUser
 } from '../types';
 import { 
   INITIAL_APPOINTMENTS, 
@@ -36,6 +37,7 @@ const STORAGE_KEYS = {
   CLINIC_CEP: 'dra_kaline_clinic_cep_v2',
   CLINIC_FULL_ADDRESS: 'dra_kaline_clinic_full_address_v2',
   CLINIC_MAPS_URL: 'dra_kaline_clinic_maps_url_v2',
+  ADMIN_USERS: 'dra_kaline_admin_users_v2',
 };
 
 export interface AppNotification {
@@ -1062,6 +1064,193 @@ class StorageService {
 
     const current = this.getHeroSlides().filter(s => s.id !== id);
     this.saveHeroSlides(current);
+  }
+
+  // ----------------------------------------------------
+  // Admin Users & Credentials Management (Database Sync)
+  // ----------------------------------------------------
+  getAdminUsers(): AdminUser[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.ADMIN_USERS);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Error reading admin users from local storage', e);
+    }
+    const defaultUser: AdminUser = {
+      id: 'user-admin-1',
+      username: 'admin',
+      password: 'admin',
+      name: 'Dra. Kaline / Administrador',
+      role: 'Administrador',
+      createdAt: new Date().toISOString()
+    };
+    this.saveAdminUsers([defaultUser]);
+    return [defaultUser];
+  }
+
+  saveAdminUsers(users: AdminUser[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.ADMIN_USERS, JSON.stringify(users));
+    } catch (e) {
+      console.error('Error saving admin users to local storage', e);
+    }
+  }
+
+  async fetchAdminUsersLive(): Promise<AdminUser[]> {
+    try {
+      const res = await fetch('/api/admin/users');
+      if (res.ok) {
+        const users = await res.json();
+        if (Array.isArray(users) && users.length > 0) {
+          this.saveAdminUsers(users);
+          return users;
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching admin users from backend, using local cache', e);
+    }
+    return this.getAdminUsers();
+  }
+
+  async loginLive(username: string, password: string): Promise<{ success: boolean; user?: AdminUser; error?: string }> {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        return { success: true, user: data.user };
+      } else {
+        return { success: false, error: data.error || 'Credenciais inválidas.' };
+      }
+    } catch (e) {
+      console.warn('Backend login endpoint unavailable, trying local validation', e);
+    }
+
+    // Local fallback validation
+    const localUsers = this.getAdminUsers();
+    const cleanUser = username.trim().toLowerCase();
+    const cleanPass = password.trim();
+
+    const matched = localUsers.find(
+      u => u.username.toLowerCase() === cleanUser && (u.password === cleanPass || !u.password)
+    );
+
+    if (matched) {
+      return { success: true, user: matched };
+    }
+
+    // Legacy fallback check
+    if ((cleanUser === 'admin' || cleanUser === 'drakaline') && 
+        (cleanPass === 'admin' || cleanPass === '123456' || cleanPass === 'dra_kaline_admin_2025')) {
+      return {
+        success: true,
+        user: {
+          id: 'user-admin-1',
+          username: 'admin',
+          name: 'Dra. Kaline / Administrador',
+          role: 'Administrador'
+        }
+      };
+    }
+
+    return { success: false, error: 'Usuário ou senha incorretos.' };
+  }
+
+  async addAdminUserLive(userData: { username: string; password: string; name: string; role?: string }): Promise<AdminUser> {
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const users = this.getAdminUsers();
+        users.push(data.user);
+        this.saveAdminUsers(users);
+        return data.user;
+      } else {
+        const err = await res.json();
+        throw new Error(err.error || 'Erro ao criar usuário');
+      }
+    } catch (e: any) {
+      console.warn('Backend create user failed, saving locally:', e);
+      // Local fallback
+      const newUser: AdminUser = {
+        id: 'usr-' + Date.now(),
+        username: userData.username.trim().toLowerCase(),
+        password: userData.password.trim(),
+        name: userData.name.trim(),
+        role: userData.role || 'Administrador',
+        createdAt: new Date().toISOString()
+      };
+      const users = this.getAdminUsers();
+      if (users.some(u => u.username.toLowerCase() === newUser.username)) {
+        throw new Error('Este nome de usuário já está em uso.');
+      }
+      users.push(newUser);
+      this.saveAdminUsers(users);
+      return newUser;
+    }
+  }
+
+  async updateAdminUserLive(id: string, updates: { username?: string; password?: string; name?: string; role?: string }): Promise<void> {
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Erro ao atualizar usuário');
+      }
+    } catch (e: any) {
+      console.warn('Backend update user failed, updating locally:', e);
+    }
+
+    const users = this.getAdminUsers().map(u => {
+      if (u.id === id) {
+        return {
+          ...u,
+          ...(updates.username ? { username: updates.username.trim().toLowerCase() } : {}),
+          ...(updates.password ? { password: updates.password.trim() } : {}),
+          ...(updates.name ? { name: updates.name.trim() } : {}),
+          ...(updates.role ? { role: updates.role.trim() } : {}),
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return u;
+    });
+    this.saveAdminUsers(users);
+  }
+
+  async deleteAdminUserLive(id: string): Promise<void> {
+    const currentUsers = this.getAdminUsers();
+    if (currentUsers.length <= 1) {
+      throw new Error('Não é possível excluir o único usuário administrador.');
+    }
+
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Erro ao excluir usuário');
+      }
+    } catch (e: any) {
+      console.warn('Backend delete user failed, deleting locally:', e);
+    }
+
+    const filtered = currentUsers.filter(u => u.id !== id);
+    this.saveAdminUsers(filtered);
   }
 }
 

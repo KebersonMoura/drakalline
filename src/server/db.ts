@@ -73,7 +73,8 @@ export async function checkMySqlConnection(): Promise<DbStatusInfo> {
       'testimonials',
       'notifications',
       'clinic_settings',
-      'hero_slides'
+      'hero_slides',
+      'admin_users'
     ];
 
     const tablesCount: Record<string, number> = {};

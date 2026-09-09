@@ -27,6 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState<string>(() => storageService.getWhatsappNumber());
+  const [clinicLogo, setClinicLogo] = useState<string>(() => storageService.getClinicLogo());
 
   useEffect(() => {
     const handleScroll = () => {
@@ -43,9 +44,19 @@ export const Navbar: React.FC<NavbarProps> = ({
     };
     window.addEventListener('whatsapp-updated', handleWhatsappUpdate);
 
+    const handleLogoUpdate = (e: any) => {
+      if (typeof e?.detail === 'string') {
+        setClinicLogo(e.detail);
+      } else {
+        setClinicLogo(storageService.getClinicLogo());
+      }
+    };
+    window.addEventListener('clinic-logo-updated', handleLogoUpdate);
+
     return () => {
       window.removeEventListener('scroll', handleScroll);
       window.removeEventListener('whatsapp-updated', handleWhatsappUpdate);
+      window.removeEventListener('clinic-logo-updated', handleLogoUpdate);
     };
   }, []);
 
@@ -71,14 +82,24 @@ export const Navbar: React.FC<NavbarProps> = ({
           
           {/* Brand Logo */}
           <a href="#inicio" className="flex items-center gap-2.5 group">
-            <div className="w-9 h-9 rounded-full bg-[#aa907d] text-white flex items-center justify-center shadow-xs transition-transform group-hover:scale-105">
-              <span className="font-serif text-lg font-bold tracking-tight">K</span>
-            </div>
-            <div>
-              <span className="font-serif text-xl sm:text-2xl font-semibold tracking-wide text-[#3b3530] block leading-none">
-                Dra. Kaline
-              </span>
-            </div>
+            {clinicLogo ? (
+              <img
+                src={clinicLogo}
+                alt="Logo Dra. Kaline"
+                className="h-9 sm:h-11 w-auto max-w-[170px] sm:max-w-[220px] object-contain transition-transform group-hover:scale-105"
+              />
+            ) : (
+              <>
+                <div className="w-9 h-9 rounded-full bg-[#aa907d] text-white flex items-center justify-center shadow-xs transition-transform group-hover:scale-105">
+                  <span className="font-serif text-lg font-bold tracking-tight">K</span>
+                </div>
+                <div>
+                  <span className="font-serif text-xl sm:text-2xl font-semibold tracking-wide text-[#3b3530] block leading-none">
+                    Dra. Kaline
+                  </span>
+                </div>
+              </>
+            )}
           </a>
 
           {/* Desktop Navigation - inicio, sobre, tratamento, contato */}

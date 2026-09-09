@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   MessageCircle, 
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  MapPin
 } from 'lucide-react';
 import { Procedure, Appointment } from '../types';
 import { storageService } from '../services/storageService';
@@ -159,6 +160,10 @@ export const QuickBookingModal: React.FC<QuickBookingModalProps> = ({
                 <span className="text-[#ada49c]">Data e Horário:</span>
                 <span className="font-semibold text-[#3b3530]">{confirmedBooking.date} às {confirmedBooking.time}</span>
               </div>
+              <div className="flex justify-between border-b border-[#c9bcad]/60 pb-2">
+                <span className="text-[#ada49c]">Local do Atendimento:</span>
+                <span className="font-semibold text-[#3b3530] text-right">Rua Fidêncio Ramos, 100, 5º andar - Vila Olímpia, São Paulo/SP</span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-[#ada49c]">Status:</span>
                 <span className="font-semibold text-[#aa907d] bg-[#c9bcad]/30 px-2 py-0.5 rounded-md">Pendente de Confirmação</span>
@@ -201,6 +206,10 @@ export const QuickBookingModal: React.FC<QuickBookingModalProps> = ({
               <p className="text-xs text-[#655d56]">
                 Escolha o procedimento, o melhor dia e receba lembretes automáticos de consulta.
               </p>
+              <div className="flex items-center gap-1.5 text-[11px] text-[#655d56] bg-[#c9bcad]/20 px-3 py-1.5 rounded-xl border border-[#c9bcad]/40 mt-1">
+                <MapPin className="w-3.5 h-3.5 text-[#aa907d] shrink-0" />
+                <span>Consultório: Rua Fidêncio Ramos, 100, 5º andar - Vila Olímpia, São Paulo/SP</span>
+              </div>
             </div>
 
             {/* Procedure Select */}

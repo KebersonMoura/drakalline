@@ -834,6 +834,50 @@ app.put('/api/settings/photo', async (req, res) => {
   res.json({ status: 'success', photoUrl });
 });
 
+// GET & PUT Clinic Logo (Transparent PNG)
+app.get('/api/settings/logo', async (req, res) => {
+  const pool = getMySqlPool();
+  if (pool) {
+    try {
+      await ensureClinicSettingsTable(pool);
+      const [rows]: any = await pool.query('SELECT setting_value FROM clinic_settings WHERE setting_key = ?', ['clinic_logo']);
+      if (rows && rows.length > 0) {
+        return res.json({ logoUrl: rows[0].setting_value || '' });
+      }
+    } catch (err: any) {
+      console.warn('MySQL logo lookup error:', err.message);
+    }
+  }
+
+  const local = getLocalClinicSettings();
+  res.json({ logoUrl: local['clinic_logo'] || '' });
+});
+
+app.put('/api/settings/logo', async (req, res) => {
+  const pool = getMySqlPool();
+  const { logoUrl } = req.body;
+  const safeLogoUrl = typeof logoUrl === 'string' ? logoUrl : '';
+
+  // Save to local file
+  const local = getLocalClinicSettings();
+  local['clinic_logo'] = safeLogoUrl;
+  saveLocalClinicSettings(local);
+
+  // Save to MySQL if connected
+  if (pool) {
+    try {
+      await ensureClinicSettingsTable(pool);
+      await pool.query(
+        'INSERT INTO clinic_settings (setting_key, setting_value, updated_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()',
+        ['clinic_logo', safeLogoUrl]
+      );
+    } catch (err: any) {
+      console.error('Error saving clinic_logo in MySQL:', err);
+    }
+  }
+  res.json({ status: 'success', logoUrl: safeLogoUrl });
+});
+
 // GET & PUT WhatsApp Settings
 app.get('/api/settings/whatsapp', async (req, res) => {
   const pool = getMySqlPool();
@@ -905,6 +949,88 @@ app.put('/api/settings/whatsapp', async (req, res) => {
   }
 
   res.json({ status: 'success', whatsappNumber, whatsappDisplay });
+});
+
+// GET & PUT Address Settings
+app.get('/api/settings/address', async (req, res) => {
+  const pool = getMySqlPool();
+  let address = '';
+  let city = '';
+  let cep = '';
+  let fullAddress = '';
+  let mapsUrl = '';
+
+  if (pool) {
+    try {
+      await ensureClinicSettingsTable(pool);
+      const [rows]: any = await pool.query(
+        'SELECT setting_key, setting_value FROM clinic_settings WHERE setting_key IN (?, ?, ?, ?, ?)',
+        ['clinic_address', 'clinic_city', 'clinic_cep', 'clinic_full_address', 'clinic_maps_url']
+      );
+      if (rows && rows.length > 0) {
+        for (const row of rows) {
+          if (row.setting_key === 'clinic_address') address = row.setting_value;
+          if (row.setting_key === 'clinic_city') city = row.setting_value;
+          if (row.setting_key === 'clinic_cep') cep = row.setting_value;
+          if (row.setting_key === 'clinic_full_address') fullAddress = row.setting_value;
+          if (row.setting_key === 'clinic_maps_url') mapsUrl = row.setting_value;
+        }
+      }
+    } catch (err: any) {
+      console.warn('MySQL address settings lookup error:', err.message);
+    }
+  }
+
+  // Fallback to local settings file or defaults
+  const local = getLocalClinicSettings();
+  if (!address) address = local['clinic_address'] || 'Rua Fidêncio Ramos, 100, 5º andar - Vila Olímpia';
+  if (!city) city = local['clinic_city'] || 'São Paulo/SP';
+  if (!cep) cep = local['clinic_cep'] || '04551-010';
+  if (!fullAddress) fullAddress = local['clinic_full_address'] || `${address}, ${city} - CEP ${cep}`;
+  if (!mapsUrl) mapsUrl = local['clinic_maps_url'] || 'https://maps.google.com/?q=Rua+Fid%C3%AAncio+Ramos,+100+-+Vila+Ol%C3%ADmpia,+S%C3%A3o+Paulo+-+SP,+04551-010';
+
+  res.json({ address, city, cep, fullAddress, mapsUrl });
+});
+
+app.put('/api/settings/address', async (req, res) => {
+  const pool = getMySqlPool();
+  const { address, city, cep, fullAddress, mapsUrl } = req.body;
+  if (!address) {
+    return res.status(400).json({ error: 'Endereço é obrigatório' });
+  }
+
+  // Save to local file
+  const local = getLocalClinicSettings();
+  local['clinic_address'] = address;
+  if (city) local['clinic_city'] = city;
+  if (cep) local['clinic_cep'] = cep;
+  if (fullAddress) local['clinic_full_address'] = fullAddress;
+  if (mapsUrl) local['clinic_maps_url'] = mapsUrl;
+  saveLocalClinicSettings(local);
+
+  // Save to MySQL if connected
+  if (pool) {
+    try {
+      await ensureClinicSettingsTable(pool);
+      const keysToUpdate = [
+        ['clinic_address', address],
+        ['clinic_city', city || 'São Paulo/SP'],
+        ['clinic_cep', cep || '04551-010'],
+        ['clinic_full_address', fullAddress || `${address}, ${city || 'São Paulo/SP'} - CEP ${cep || '04551-010'}`],
+        ['clinic_maps_url', mapsUrl || 'https://maps.google.com/?q=Rua+Fid%C3%AAncio+Ramos,+100+-+Vila+Ol%C3%ADmpia,+S%C3%A3o+Paulo+-+SP,+04551-010']
+      ];
+      for (const [key, val] of keysToUpdate) {
+        await pool.query(
+          'INSERT INTO clinic_settings (setting_key, setting_value, updated_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()',
+          [key, val]
+        );
+      }
+    } catch (err: any) {
+      console.error('Error saving address settings in MySQL:', err);
+    }
+  }
+
+  res.json({ status: 'success', address, city, cep, fullAddress, mapsUrl });
 });
 
 // ----------------------------------------------------

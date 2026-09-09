@@ -6,7 +6,8 @@ import {
   Clock, 
   Phone, 
   Lock, 
-  ArrowUp
+  ArrowUp,
+  ExternalLink
 } from 'lucide-react';
 import { CLINIC_INFO } from '../data/initialData';
 import { storageService } from '../services/storageService';
@@ -19,6 +20,8 @@ interface FooterProps {
 export const Footer: React.FC<FooterProps> = ({ onOpenBooking, onOpenAdmin }) => {
   const [whatsappNumber, setWhatsappNumber] = useState<string>(() => storageService.getWhatsappNumber());
   const [whatsappDisplay, setWhatsappDisplay] = useState<string>(() => storageService.getWhatsappDisplay());
+  const [clinicLogo, setClinicLogo] = useState<string>(() => storageService.getClinicLogo());
+  const [clinicAddress, setClinicAddress] = useState(() => storageService.getClinicAddress());
 
   useEffect(() => {
     const handleWhatsappUpdate = (e: any) => {
@@ -31,7 +34,30 @@ export const Footer: React.FC<FooterProps> = ({ onOpenBooking, onOpenAdmin }) =>
       }
     };
     window.addEventListener('whatsapp-updated', handleWhatsappUpdate);
-    return () => window.removeEventListener('whatsapp-updated', handleWhatsappUpdate);
+
+    const handleLogoUpdate = (e: any) => {
+      if (typeof e?.detail === 'string') {
+        setClinicLogo(e.detail);
+      } else {
+        setClinicLogo(storageService.getClinicLogo());
+      }
+    };
+    window.addEventListener('clinic-logo-updated', handleLogoUpdate);
+
+    const handleAddressUpdate = (e: any) => {
+      if (e?.detail) {
+        setClinicAddress(e.detail);
+      } else {
+        setClinicAddress(storageService.getClinicAddress());
+      }
+    };
+    window.addEventListener('clinic-address-updated', handleAddressUpdate);
+
+    return () => {
+      window.removeEventListener('whatsapp-updated', handleWhatsappUpdate);
+      window.removeEventListener('clinic-logo-updated', handleLogoUpdate);
+      window.removeEventListener('clinic-address-updated', handleAddressUpdate);
+    };
   }, []);
 
   const scrollToTop = () => {
@@ -49,17 +75,29 @@ export const Footer: React.FC<FooterProps> = ({ onOpenBooking, onOpenAdmin }) =>
           {/* Brand Info */}
           <div className="space-y-3 lg:col-span-2">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-[#aa907d] text-[#f4f3eb] flex items-center justify-center">
-                <span className="font-serif text-sm font-bold">K</span>
-              </div>
-              <div>
-                <span className="font-serif text-lg font-bold text-[#f4f3eb] block leading-tight">
-                  Dra. Kaline
-                </span>
-                <span className="text-[10px] tracking-wider uppercase text-[#c9bcad] block">
-                  Especialista em saúde e restauração capilar
-                </span>
-              </div>
+              {clinicLogo ? (
+                <div className="py-1">
+                  <img
+                    src={clinicLogo}
+                    alt="Logo Dra. Kaline"
+                    className="h-10 sm:h-12 w-auto max-w-[210px] object-contain"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="w-8 h-8 rounded-full bg-[#aa907d] text-[#f4f3eb] flex items-center justify-center">
+                    <span className="font-serif text-sm font-bold">K</span>
+                  </div>
+                  <div>
+                    <span className="font-serif text-lg font-bold text-[#f4f3eb] block leading-tight">
+                      Dra. Kaline
+                    </span>
+                    <span className="text-[10px] tracking-wider uppercase text-[#c9bcad] block">
+                      Especialista em saúde e restauração capilar
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
 
             <p className="text-xs text-[#ada49c] leading-relaxed max-w-md pt-1">
@@ -117,11 +155,24 @@ export const Footer: React.FC<FooterProps> = ({ onOpenBooking, onOpenAdmin }) =>
             <h4 className="text-xs font-semibold uppercase tracking-wider text-[#f4f3eb]">
               Contato
             </h4>
-            <div className="space-y-2 text-xs text-[#ada49c]">
-              <p className="flex items-start gap-2">
+            <div className="space-y-2.5 text-xs text-[#ada49c]">
+              <div className="flex items-start gap-2">
                 <MapPin className="w-3.5 h-3.5 text-[#aa907d] shrink-0 mt-0.5" />
-                <span>{CLINIC_INFO.address}, {CLINIC_INFO.city}</span>
-              </p>
+                <div className="space-y-0.5">
+                  <p className="text-[#f4f3eb] font-medium leading-tight">{clinicAddress.address}</p>
+                  <p className="leading-tight">{clinicAddress.city}{clinicAddress.cep ? ` • CEP ${clinicAddress.cep}` : ''}</p>
+                  <a
+                    href={clinicAddress.mapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-[#aa907d] hover:text-[#f4f3eb] underline underline-offset-2 transition-colors pt-0.5"
+                    title="Abrir no Google Maps"
+                  >
+                    <span>Como chegar (Google Maps)</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
               <p className="flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 text-[#aa907d] shrink-0" />
                 <span>{CLINIC_INFO.openingHours}</span>

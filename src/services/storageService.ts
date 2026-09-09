@@ -30,6 +30,12 @@ const STORAGE_KEYS = {
   HERO_SLIDES: 'dra_kaline_hero_slides_v2',
   WHATSAPP_NUMBER: 'dra_kaline_whatsapp_number_v2',
   WHATSAPP_DISPLAY: 'dra_kaline_whatsapp_display_v2',
+  CLINIC_LOGO: 'dra_kaline_clinic_logo_v2',
+  CLINIC_ADDRESS: 'dra_kaline_clinic_address_v2',
+  CLINIC_CITY: 'dra_kaline_clinic_city_v2',
+  CLINIC_CEP: 'dra_kaline_clinic_cep_v2',
+  CLINIC_FULL_ADDRESS: 'dra_kaline_clinic_full_address_v2',
+  CLINIC_MAPS_URL: 'dra_kaline_clinic_maps_url_v2',
 };
 
 export interface AppNotification {
@@ -280,8 +286,75 @@ class StorageService {
   }
 
   private inMemoryDoctorPhoto: string = '';
+  private inMemoryClinicLogo: string = '';
   private inMemoryWhatsappNumber: string = '';
   private inMemoryWhatsappDisplay: string = '';
+  private inMemoryClinicAddress: string = '';
+  private inMemoryClinicCity: string = '';
+  private inMemoryClinicCep: string = '';
+  private inMemoryClinicFullAddress: string = '';
+  private inMemoryClinicMapsUrl: string = '';
+
+  getClinicLogo(): string {
+    if (this.inMemoryClinicLogo) return this.inMemoryClinicLogo;
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.CLINIC_LOGO);
+      if (data) {
+        this.inMemoryClinicLogo = data;
+        return data;
+      }
+    } catch (e) {
+      console.warn('Error reading clinic logo', e);
+    }
+    return '';
+  }
+
+  async fetchLiveClinicLogo(): Promise<string> {
+    try {
+      const res = await fetch('/api/settings/logo');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data.logoUrl === 'string') {
+          this.inMemoryClinicLogo = data.logoUrl;
+          try {
+            localStorage.setItem(STORAGE_KEYS.CLINIC_LOGO, data.logoUrl);
+          } catch {
+            // Quota fallback
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('clinic-logo-updated', { detail: data.logoUrl }));
+          }
+          return data.logoUrl;
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+    return this.getClinicLogo();
+  }
+
+  saveClinicLogo(logoUrl: string): string {
+    const cleanUrl = typeof logoUrl === 'string' ? logoUrl.trim() : '';
+    this.inMemoryClinicLogo = cleanUrl;
+    try {
+      localStorage.setItem(STORAGE_KEYS.CLINIC_LOGO, cleanUrl);
+    } catch (e) {
+      console.warn('LocalStorage quota limit reached for clinic logo', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('clinic-logo-updated', { detail: cleanUrl }));
+    }
+
+    // Sync to MySQL backend
+    fetch('/api/settings/logo', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ logoUrl: cleanUrl })
+    }).catch(err => console.warn('Background sync clinic logo failed:', err));
+
+    return cleanUrl;
+  }
 
   getWhatsappNumber(): string {
     if (this.inMemoryWhatsappNumber) return this.inMemoryWhatsappNumber;
@@ -385,6 +458,157 @@ class StorageService {
     }).catch(err => console.warn('Background sync whatsapp failed:', err));
 
     return { whatsappNumber: cleanNumber, whatsappDisplay: display };
+  }
+
+  getClinicAddress(): {
+    address: string;
+    city: string;
+    cep: string;
+    fullAddress: string;
+    mapsUrl: string;
+  } {
+    if (this.inMemoryClinicAddress) {
+      return {
+        address: this.inMemoryClinicAddress,
+        city: this.inMemoryClinicCity || CLINIC_INFO.city,
+        cep: this.inMemoryClinicCep || CLINIC_INFO.cep,
+        fullAddress: this.inMemoryClinicFullAddress || CLINIC_INFO.fullAddress,
+        mapsUrl: this.inMemoryClinicMapsUrl || CLINIC_INFO.mapsUrl
+      };
+    }
+    try {
+      const addr = localStorage.getItem(STORAGE_KEYS.CLINIC_ADDRESS);
+      const city = localStorage.getItem(STORAGE_KEYS.CLINIC_CITY);
+      const cep = localStorage.getItem(STORAGE_KEYS.CLINIC_CEP);
+      const full = localStorage.getItem(STORAGE_KEYS.CLINIC_FULL_ADDRESS);
+      const maps = localStorage.getItem(STORAGE_KEYS.CLINIC_MAPS_URL);
+      if (addr) {
+        this.inMemoryClinicAddress = addr;
+        this.inMemoryClinicCity = city || CLINIC_INFO.city;
+        this.inMemoryClinicCep = cep || CLINIC_INFO.cep;
+        this.inMemoryClinicFullAddress = full || CLINIC_INFO.fullAddress;
+        this.inMemoryClinicMapsUrl = maps || CLINIC_INFO.mapsUrl;
+        return {
+          address: addr,
+          city: this.inMemoryClinicCity,
+          cep: this.inMemoryClinicCep,
+          fullAddress: this.inMemoryClinicFullAddress,
+          mapsUrl: this.inMemoryClinicMapsUrl
+        };
+      }
+    } catch (e) {
+      console.warn('Error reading clinic address from storage', e);
+    }
+    return {
+      address: CLINIC_INFO.address,
+      city: CLINIC_INFO.city,
+      cep: CLINIC_INFO.cep,
+      fullAddress: CLINIC_INFO.fullAddress,
+      mapsUrl: CLINIC_INFO.mapsUrl
+    };
+  }
+
+  async fetchLiveClinicAddress(): Promise<{
+    address: string;
+    city: string;
+    cep: string;
+    fullAddress: string;
+    mapsUrl: string;
+  }> {
+    try {
+      const res = await fetch('/api/settings/address');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.address) {
+          this.inMemoryClinicAddress = data.address;
+          this.inMemoryClinicCity = data.city || CLINIC_INFO.city;
+          this.inMemoryClinicCep = data.cep || CLINIC_INFO.cep;
+          this.inMemoryClinicFullAddress = data.fullAddress || CLINIC_INFO.fullAddress;
+          this.inMemoryClinicMapsUrl = data.mapsUrl || CLINIC_INFO.mapsUrl;
+          try {
+            localStorage.setItem(STORAGE_KEYS.CLINIC_ADDRESS, data.address);
+            if (data.city) localStorage.setItem(STORAGE_KEYS.CLINIC_CITY, data.city);
+            if (data.cep) localStorage.setItem(STORAGE_KEYS.CLINIC_CEP, data.cep);
+            if (data.fullAddress) localStorage.setItem(STORAGE_KEYS.CLINIC_FULL_ADDRESS, data.fullAddress);
+            if (data.mapsUrl) localStorage.setItem(STORAGE_KEYS.CLINIC_MAPS_URL, data.mapsUrl);
+          } catch {
+            // Quota fallback
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('clinic-address-updated', {
+              detail: {
+                address: data.address,
+                city: this.inMemoryClinicCity,
+                cep: this.inMemoryClinicCep,
+                fullAddress: this.inMemoryClinicFullAddress,
+                mapsUrl: this.inMemoryClinicMapsUrl
+              }
+            }));
+          }
+          return {
+            address: data.address,
+            city: this.inMemoryClinicCity,
+            cep: this.inMemoryClinicCep,
+            fullAddress: this.inMemoryClinicFullAddress,
+            mapsUrl: this.inMemoryClinicMapsUrl
+          };
+        }
+      }
+    } catch {
+      // Offline fallback
+    }
+    return this.getClinicAddress();
+  }
+
+  saveClinicAddress(info: {
+    address: string;
+    city?: string;
+    cep?: string;
+    fullAddress?: string;
+    mapsUrl?: string;
+  }): {
+    address: string;
+    city: string;
+    cep: string;
+    fullAddress: string;
+    mapsUrl: string;
+  } {
+    const address = info.address.trim();
+    const city = (info.city || 'São Paulo/SP').trim();
+    const cep = (info.cep || '04551-010').trim();
+    const fullAddress = (info.fullAddress || `${address}, ${city} - CEP ${cep}`).trim();
+    const mapsUrl = info.mapsUrl || `https://maps.google.com/?q=${encodeURIComponent(`${address}, ${city}, ${cep}`)}`;
+
+    this.inMemoryClinicAddress = address;
+    this.inMemoryClinicCity = city;
+    this.inMemoryClinicCep = cep;
+    this.inMemoryClinicFullAddress = fullAddress;
+    this.inMemoryClinicMapsUrl = mapsUrl;
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.CLINIC_ADDRESS, address);
+      localStorage.setItem(STORAGE_KEYS.CLINIC_CITY, city);
+      localStorage.setItem(STORAGE_KEYS.CLINIC_CEP, cep);
+      localStorage.setItem(STORAGE_KEYS.CLINIC_FULL_ADDRESS, fullAddress);
+      localStorage.setItem(STORAGE_KEYS.CLINIC_MAPS_URL, mapsUrl);
+    } catch (e) {
+      console.warn('LocalStorage quota limit reached for address', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('clinic-address-updated', {
+        detail: { address, city, cep, fullAddress, mapsUrl }
+      }));
+    }
+
+    // Sync to backend
+    fetch('/api/settings/address', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address, city, cep, fullAddress, mapsUrl })
+    }).catch(err => console.warn('Background sync address failed:', err));
+
+    return { address, city, cep, fullAddress, mapsUrl };
   }
 
   getDoctorPhoto(): string {

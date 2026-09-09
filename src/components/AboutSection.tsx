@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Award, ShieldCheck, Stethoscope, Microscope, MapPin, Instagram, Camera } from 'lucide-react';
+import { Award, ShieldCheck, Stethoscope, Microscope, MapPin, Instagram } from 'lucide-react';
 import { CLINIC_INFO } from '../data/initialData';
 import { storageService } from '../services/storageService';
-import { ChangePhotoModal } from './ChangePhotoModal';
 
 export const AboutSection: React.FC = () => {
   const [photoSrc, setPhotoSrc] = useState<string>(() => storageService.getDoctorPhoto());
-  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [clinicAddress, setClinicAddress] = useState(() => storageService.getClinicAddress());
 
   useEffect(() => {
     storageService.fetchLiveDoctorPhoto().then(url => {
@@ -19,8 +18,20 @@ export const AboutSection: React.FC = () => {
       }
     };
 
+    const handleAddressUpdated = (e: any) => {
+      if (e.detail) {
+        setClinicAddress(e.detail);
+      } else {
+        setClinicAddress(storageService.getClinicAddress());
+      }
+    };
+
     window.addEventListener('doctor-photo-updated', handlePhotoUpdated);
-    return () => window.removeEventListener('doctor-photo-updated', handlePhotoUpdated);
+    window.addEventListener('clinic-address-updated', handleAddressUpdated);
+    return () => {
+      window.removeEventListener('doctor-photo-updated', handlePhotoUpdated);
+      window.removeEventListener('clinic-address-updated', handleAddressUpdated);
+    };
   }, []);
   return (
     <section id="sobre" className="py-16 md:py-20 bg-[#c9bcad]/20 border-y border-[#c9bcad] scroll-mt-20">
@@ -39,17 +50,6 @@ export const AboutSection: React.FC = () => {
                   onError={() => setPhotoSrc('/images/foto-1-destaque.svg')}
                   referrerPolicy="no-referrer"
                 />
-
-                {/* Interactive button to change doctor photo */}
-                <button
-                  type="button"
-                  onClick={() => setIsPhotoModalOpen(true)}
-                  className="absolute top-4 right-4 bg-[#3b3530]/85 hover:bg-[#aa907d] text-white px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 shadow-md backdrop-blur-xs transition-all opacity-80 hover:opacity-100 hover:scale-105 cursor-pointer"
-                  title="Alterar foto da Dra. Kaline"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Alterar Foto</span>
-                </button>
               </div>
 
               {/* Badge */}
@@ -109,10 +109,16 @@ export const AboutSection: React.FC = () => {
 
             {/* Contact details mini footer */}
             <div className="pt-2 flex flex-wrap items-center gap-5 text-xs text-[#655d56]">
-              <div className="flex items-center gap-1.5 font-medium">
-                <MapPin className="w-3.5 h-3.5 text-[#aa907d]" />
-                <span>{CLINIC_INFO.address}</span>
-              </div>
+              <a
+                href={clinicAddress.mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 font-medium hover:text-[#aa907d] transition-colors"
+                title="Ver localização no Google Maps"
+              >
+                <MapPin className="w-3.5 h-3.5 text-[#aa907d] shrink-0" />
+                <span>{clinicAddress.address}, {clinicAddress.city}</span>
+              </a>
               <a
                 href={CLINIC_INFO.instagramUrl}
                 target="_blank"
@@ -129,12 +135,6 @@ export const AboutSection: React.FC = () => {
         </div>
 
       </div>
-
-      <ChangePhotoModal
-        isOpen={isPhotoModalOpen}
-        onClose={() => setIsPhotoModalOpen(false)}
-        onPhotoChanged={(newUrl) => setPhotoSrc(newUrl)}
-      />
     </section>
   );
 };

@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, MessageCircle, Sparkles, ArrowRight, ShieldCheck, Microscope, Camera } from 'lucide-react';
+import { Calendar, MessageCircle, Sparkles, ArrowRight, ShieldCheck, Microscope } from 'lucide-react';
 import { CLINIC_INFO } from '../data/initialData';
 import { storageService } from '../services/storageService';
-import { ChangePhotoModal } from './ChangePhotoModal';
 
 interface HeroProps {
   onOpenBooking: () => void;
@@ -10,7 +9,6 @@ interface HeroProps {
 
 export const Hero: React.FC<HeroProps> = ({ onOpenBooking }) => {
   const [photoSrc, setPhotoSrc] = useState<string>(() => storageService.getDoctorPhoto());
-  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
 
   useEffect(() => {
     // Initial fetch
@@ -116,17 +114,6 @@ export const Hero: React.FC<HeroProps> = ({ onOpenBooking }) => {
                   onError={() => setPhotoSrc('/images/foto-1-destaque.svg')}
                   referrerPolicy="no-referrer"
                 />
-
-                {/* Subtle Interactive Button to Change Photo */}
-                <button
-                  type="button"
-                  onClick={() => setIsPhotoModalOpen(true)}
-                  className="absolute top-3 right-3 bg-[#3b3530]/85 hover:bg-[#aa907d] text-white px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 shadow-md backdrop-blur-xs transition-all opacity-80 hover:opacity-100 hover:scale-105 cursor-pointer"
-                  title="Alterar foto da Dra. Kaline"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Alterar Foto</span>
-                </button>
                 
                 {/* Clean Bottom Overlay */}
                 <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-[#2c2724]/90 via-[#2c2724]/50 to-transparent p-5 text-white">
@@ -150,12 +137,6 @@ export const Hero: React.FC<HeroProps> = ({ onOpenBooking }) => {
 
         </div>
       </div>
-
-      <ChangePhotoModal
-        isOpen={isPhotoModalOpen}
-        onClose={() => setIsPhotoModalOpen(false)}
-        onPhotoChanged={(newUrl) => setPhotoSrc(newUrl)}
-      />
     </section>
   );
 };

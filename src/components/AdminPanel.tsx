@@ -32,7 +32,10 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  SlidersHorizontal
+  SlidersHorizontal,
+  RotateCcw,
+  Upload,
+  MapPin
 } from 'lucide-react';
 import { 
   Appointment, 
@@ -48,6 +51,7 @@ import { storageService } from '../services/storageService';
 import { notificationService } from '../services/notificationService';
 import { CLINIC_INFO } from '../data/initialData';
 import { ChangePhotoModal } from './ChangePhotoModal';
+import { ChangeLogoModal } from './ChangeLogoModal';
 import { EditSlideModal } from './EditSlideModal';
 import { EditProcedureModal } from './EditProcedureModal';
 
@@ -78,6 +82,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [whatsappSaving, setWhatsappSaving] = useState<boolean>(false);
   const [whatsappSuccessMsg, setWhatsappSuccessMsg] = useState<string>('');
 
+  const [adminAddress, setAdminAddress] = useState<string>(() => storageService.getClinicAddress().address);
+  const [adminCity, setAdminCity] = useState<string>(() => storageService.getClinicAddress().city);
+  const [adminCep, setAdminCep] = useState<string>(() => storageService.getClinicAddress().cep);
+  const [addressSaving, setAddressSaving] = useState<boolean>(false);
+  const [addressSuccessMsg, setAddressSuccessMsg] = useState<string>('');
+
   // Data states
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -95,6 +105,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [showAddClientModal, setShowAddClientModal] = useState<boolean>(false);
   const [showChangePhotoModal, setShowChangePhotoModal] = useState<boolean>(false);
   const [doctorPhoto, setDoctorPhoto] = useState<string>(() => storageService.getDoctorPhoto());
+  const [showChangeLogoModal, setShowChangeLogoModal] = useState<boolean>(false);
+  const [clinicLogo, setClinicLogo] = useState<string>(() => storageService.getClinicLogo());
   const [slides, setSlides] = useState<HeroSlide[]>(() => storageService.getHeroSlides());
   const [showEditSlideModal, setShowEditSlideModal] = useState<boolean>(false);
   const [selectedSlideForEdit, setSelectedSlideForEdit] = useState<HeroSlide | null>(null);
@@ -145,6 +157,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setGallery(storageService.getGallery());
     setDbConfig(storageService.getDatabaseConfig());
     setDoctorPhoto(storageService.getDoctorPhoto());
+    setClinicLogo(storageService.getClinicLogo());
     setSlides(storageService.getHeroSlides());
     setProceduresList(storageService.getProcedures());
     setAdminWhatsappNumber(storageService.getWhatsappNumber());
@@ -154,9 +167,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (Array.isArray(procs) && procs.length > 0) setProceduresList(procs);
     }).catch(() => {});
 
-    // Fetch live slides, db status and whatsapp from backend
+    // Fetch live slides, db status, whatsapp and logo from backend
     storageService.fetchLiveHeroSlides().then(s => {
       if (Array.isArray(s) && s.length > 0) setSlides(s);
+    }).catch(() => {});
+
+    storageService.fetchLiveClinicLogo().then(logo => {
+      if (typeof logo === 'string') setClinicLogo(logo);
     }).catch(() => {});
 
     storageService.fetchLiveDatabaseStatus().then(status => {
@@ -167,6 +184,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       if (w && w.whatsappNumber) {
         setAdminWhatsappNumber(w.whatsappNumber);
         setAdminWhatsappDisplay(w.whatsappDisplay);
+      }
+    }).catch(() => {});
+
+    storageService.fetchLiveClinicAddress().then(addr => {
+      if (addr && addr.address) {
+        setAdminAddress(addr.address);
+        if (addr.city) setAdminCity(addr.city);
+        if (addr.cep) setAdminCep(addr.cep);
       }
     }).catch(() => {});
   };
@@ -186,6 +211,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       console.error('Error saving whatsapp:', err);
     } finally {
       setWhatsappSaving(false);
+    }
+  };
+
+  const handleSaveAddressAdmin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!adminAddress.trim()) return;
+    setAddressSaving(true);
+    try {
+      const fullAddress = `${adminAddress}, ${adminCity} - CEP ${adminCep}`;
+      const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(`${adminAddress}, ${adminCity}, ${adminCep}`)}`;
+      storageService.saveClinicAddress({
+        address: adminAddress,
+        city: adminCity,
+        cep: adminCep,
+        fullAddress,
+        mapsUrl
+      });
+      setAddressSuccessMsg('Endereço do consultório atualizado com sucesso em todo o site!');
+      setTimeout(() => setAddressSuccessMsg(''), 4500);
+      onDataChanged();
+    } catch (err) {
+      console.error('Error saving address:', err);
+    } finally {
+      setAddressSaving(false);
     }
   };
 
@@ -516,6 +565,132 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     );
   };
 
+  const renderAddressCard = () => {
+    const mapsLink = `https://maps.google.com/?q=${encodeURIComponent(`${adminAddress}, ${adminCity}, ${adminCep}`)}`;
+
+    return (
+      <div className="p-6 bg-white rounded-2xl border border-stone-200 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-800">
+              <MapPin className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[10px] font-bold uppercase tracking-wider mb-0.5">
+                Localização Física do Consultório
+              </div>
+              <h4 className="text-sm font-bold text-stone-900">
+                Endereço da Clínica / Consultório
+              </h4>
+              <p className="text-xs text-stone-500">
+                Endereço exibido no rodapé, seção sobre a Dra. Kaline e voucher de agendamento de consultas.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <a
+              href={mapsLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#aa907d] hover:text-[#8a7261] bg-[#aa907d]/10 hover:bg-[#aa907d]/20 rounded-xl transition-colors border border-[#aa907d]/30"
+              title="Abrir no Google Maps"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Ver no Google Maps</span>
+            </a>
+          </div>
+        </div>
+
+        {addressSuccessMsg && (
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2 text-xs text-emerald-800 animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-medium">{addressSuccessMsg}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveAddressAdmin} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                Logradouro, Número e Complemento *
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={adminAddress}
+                  onChange={(e) => setAdminAddress(e.target.value)}
+                  placeholder="Ex: Rua Fidêncio Ramos, 100, 5º andar - Vila Olímpia"
+                  className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d] pl-9"
+                  required
+                />
+                <MapPin className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                Cidade e UF *
+              </label>
+              <input
+                type="text"
+                value={adminCity}
+                onChange={(e) => setAdminCity(e.target.value)}
+                placeholder="Ex: São Paulo/SP"
+                className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d]"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                CEP (Código Postal) *
+              </label>
+              <input
+                type="text"
+                value={adminCep}
+                onChange={(e) => setAdminCep(e.target.value)}
+                placeholder="Ex: 04551-010"
+                className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d]"
+                required
+              />
+            </div>
+
+            <div className="p-3 bg-[#f4f3eb] rounded-xl border border-[#c9bcad] flex items-center justify-between">
+              <div className="text-xs space-y-0.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#655d56] block">Visualização no Rodapé:</span>
+                <p className="font-semibold text-[#3b3530] text-xs">{adminAddress}</p>
+                <p className="text-[#655d56] text-[11px]">{adminCity} • CEP {adminCep}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="submit"
+              disabled={addressSaving || !adminAddress.trim()}
+              className="px-5 py-2.5 bg-[#3b3530] hover:bg-[#2a2522] disabled:opacity-50 text-[#f4f3eb] font-semibold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+            >
+              {addressSaving ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Salvar Endereço da Clínica</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl max-w-6xl w-full h-[92vh] shadow-2xl flex flex-col overflow-hidden relative">
@@ -523,9 +698,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* Top Bar */}
         <div className="px-6 py-4 bg-stone-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-              K
-            </div>
+            {clinicLogo ? (
+              <div className="h-8 max-w-[120px] flex items-center justify-center p-1 bg-white/10 rounded-lg overflow-hidden shrink-0 border border-white/10">
+                <img
+                  src={clinicLogo}
+                  alt="Logo Clínica"
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold shrink-0">
+                K
+              </div>
+            )}
             <div>
               <h2 className="font-serif text-lg font-bold">Painel Administrativo & Prontuários</h2>
               <p className="text-[11px] text-stone-400">Dra. Kaline | Gestão de Consultas e Histórico Clínico</p>
@@ -666,6 +851,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <span className="ml-auto text-[10px] bg-stone-800 text-stone-300 px-1.5 py-0.5 rounded-full">
                     {slides.length}
                   </span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('whatsapp'); setSelectedClient(null); }}
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    activeTab === 'whatsapp'
+                      ? 'bg-stone-900 text-white shadow-xs'
+                      : 'text-stone-700 hover:bg-stone-200/60'
+                  }`}
+                >
+                  <MessageCircle className="w-4 h-4 text-[#25D366]" />
+                  <span>WhatsApp & Endereço</span>
                 </button>
 
                 <button
@@ -1183,6 +1380,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </div>
                   </div>
 
+                  {/* Clinic Logo (Transparent PNG) Card */}
+                  <div className="p-6 bg-white rounded-3xl border border-stone-200/90 shadow-2xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+                      <div className="flex items-center gap-4">
+                        <div 
+                          className="w-24 h-16 rounded-2xl overflow-hidden border border-stone-300 bg-[#f4f3eb] flex items-center justify-center shrink-0 shadow-2xs relative p-2"
+                          style={{
+                            backgroundImage: 'linear-gradient(45deg, rgba(0,0,0,0.04) 25%, transparent 25%), linear-gradient(-45deg, rgba(0,0,0,0.04) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(0,0,0,0.04) 75%), linear-gradient(-45deg, transparent 75%, rgba(0,0,0,0.04) 75%)',
+                            backgroundSize: '12px 12px',
+                            backgroundPosition: '0 0, 0 6px, 6px -6px, -6px 0px'
+                          }}
+                        >
+                          {clinicLogo ? (
+                            <img
+                              src={clinicLogo}
+                              alt="Logo Atual"
+                              className="max-h-full max-w-full object-contain"
+                            />
+                          ) : (
+                            <div className="flex items-center gap-1.5 text-stone-400">
+                              <span className="w-6 h-6 rounded-full bg-[#aa907d] text-white flex items-center justify-center font-serif text-xs font-bold">K</span>
+                              <span className="text-[10px] font-semibold text-stone-600">Padrão</span>
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900 text-[10px] font-bold uppercase tracking-wider mb-1">
+                            {clinicLogo ? 'Logo Personalizada Ativa' : 'Logotipo Tipográfico Padrão'}
+                          </div>
+                          <h4 className="font-serif text-base font-bold text-stone-900">
+                            Logo do Site (PNG Transparente)
+                          </h4>
+                          <p className="text-xs text-stone-500 max-w-lg">
+                            Insira sua logomarca em formato PNG sem fundo para ser exibida no cabeçalho e rodapé do site. Salva no banco de dados e sincronizada em tempo real.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-start sm:self-auto">
+                        {clinicLogo && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              storageService.saveClinicLogo('');
+                              setClinicLogo('');
+                              onDataChanged();
+                            }}
+                            className="px-3.5 py-2.5 bg-stone-100 hover:bg-rose-50 hover:text-rose-700 text-stone-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer transition-all border border-stone-200"
+                            title="Remover logo personalizada e voltar ao padrão tipográfico"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Restaurar Padrão</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setShowChangeLogoModal(true)}
+                          className="px-4 py-2.5 bg-[#aa907d] hover:bg-[#967e6c] text-white text-xs font-semibold rounded-xl flex items-center gap-2 cursor-pointer shadow-xs transition-all"
+                        >
+                          <Upload className="w-4 h-4" />
+                          <span>{clinicLogo ? 'Alterar Logo (PNG)' : 'Inserir Logo (PNG)'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Doctor Featured Photo Card */}
                   <div className="p-6 bg-white rounded-3xl border border-stone-200/90 shadow-2xs space-y-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
@@ -1220,6 +1484,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {/* WhatsApp Direct Settings within Content */}
+                  {renderWhatsappCard(false)}
 
                 </div>
               )}
@@ -1364,6 +1631,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     ))}
                   </div>
 
+                </div>
+              )}
+
+              {/* TAB: WHATSAPP DO SITE */}
+              {activeTab === 'whatsapp' && (
+                <div className="space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-200 pb-4">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900 text-[10px] font-bold uppercase tracking-wider mb-1">
+                        Comunicação & Localização
+                      </div>
+                      <h3 className="font-serif text-2xl font-bold text-stone-900">
+                        Canais de Contato & Endereço Físico
+                      </h3>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Gerencie o número oficial de WhatsApp para atendimento direto e o endereço físico do consultório exibido em todo o site.
+                      </p>
+                    </div>
+                  </div>
+
+                  {renderWhatsappCard(true)}
+                  {renderAddressCard()}
                 </div>
               )}
 
@@ -1689,6 +1978,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         onClose={() => setShowChangePhotoModal(false)}
         onPhotoChanged={(newUrl) => {
           setDoctorPhoto(newUrl);
+          onDataChanged();
+        }}
+      />
+
+      {/* SUB-MODAL 5.5: Change Transparent Clinic Logo */}
+      <ChangeLogoModal
+        isOpen={showChangeLogoModal}
+        onClose={() => setShowChangeLogoModal(false)}
+        onLogoChanged={(newLogo) => {
+          setClinicLogo(newLogo);
           onDataChanged();
         }}
       />

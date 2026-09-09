@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
   Instagram, 
   Heart, 
@@ -10,10 +10,7 @@ import {
   Check, 
   Eye, 
   Calendar,
-  Star,
-  Upload,
-  Camera,
-  RefreshCw
+  Star
 } from 'lucide-react';
 import { InstagramPost } from '../types';
 import { CLINIC_INFO } from '../data/initialData';
@@ -27,15 +24,11 @@ interface InstagramGalleryProps {
 
 export const InstagramGallery: React.FC<InstagramGalleryProps> = ({ 
   posts, 
-  onOpenBooking,
-  onGalleryUpdated 
+  onOpenBooking 
 }) => {
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [activeModalPost, setActiveModalPost] = useState<InstagramPost | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [uploadModalOpen, setUploadModalOpen] = useState(false);
-  const [uploadTargetId, setUploadTargetId] = useState<string>('post-1');
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tags = ['all', 'Destaque Principal', 'Conduta Médica', 'Diagnóstico & Tricoscopia', 'Autoestima & Saúde'];
 
@@ -56,31 +49,6 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        storageService.updateGalleryPhoto(uploadTargetId, dataUrl);
-        if (onGalleryUpdated) {
-          onGalleryUpdated();
-        }
-        setUploadModalOpen(false);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const triggerUploadForPost = (postId: string) => {
-    setUploadTargetId(postId);
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-
   // Find highlight post (post-1)
   const highlightPost = posts.find(p => p.id === 'post-1') || posts[0];
   const remainingPosts = posts.filter(p => p.id !== (highlightPost?.id));
@@ -89,15 +57,6 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({
     <section id="galeria" className="py-16 sm:py-20 bg-[#f4f3eb] border-t border-[#c9bcad] scroll-mt-20">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        {/* Hidden File Input for Image Replacement */}
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-          accept="image/*" 
-          className="hidden" 
-        />
-
         {/* Section Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6 border-b border-[#c9bcad] pb-8">
           <div>
@@ -115,15 +74,6 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({
 
           {/* Actions & Profile Link */}
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => setUploadModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#c9bcad]/30 hover:bg-[#c9bcad]/50 border border-[#aa907d]/50 text-[#3b3530] text-xs font-medium transition-colors"
-              title="Carregar ou atualizar fotos locais"
-            >
-              <Upload className="w-3.5 h-3.5 text-[#aa907d]" />
-              <span>Gerenciar Fotos</span>
-            </button>
-
             <a
               href={CLINIC_INFO.instagramUrl}
               target="_blank"
@@ -211,16 +161,9 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({
                 <div className="flex flex-wrap items-center gap-3 pt-2">
                   <button
                     onClick={onOpenBooking}
-                    className="px-5 py-2.5 bg-[#aa907d] hover:bg-[#967e6c] text-[#f4f3eb] text-xs font-semibold rounded-full shadow-xs transition-colors"
+                    className="px-6 py-2.5 bg-[#aa907d] hover:bg-[#967e6c] text-[#f4f3eb] text-xs font-semibold rounded-full shadow-xs transition-colors cursor-pointer"
                   >
                     Agendar Avaliação
-                  </button>
-                  <button
-                    onClick={() => triggerUploadForPost(highlightPost.id)}
-                    className="px-4 py-2 bg-[#f4f3eb] hover:bg-[#c9bcad]/30 border border-[#aa907d] text-[#3b3530] text-xs font-medium rounded-full transition-colors flex items-center gap-1.5"
-                  >
-                    <Camera className="w-3.5 h-3.5 text-[#aa907d]" />
-                    <span>Substituir Foto 1</span>
                   </button>
                 </div>
               </div>
@@ -276,7 +219,7 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({
                 </div>
               </div>
 
-              {/* Card Footer with Quick Caption & Replace Action */}
+              {/* Card Footer with Quick Caption */}
               <div className="p-4 flex-1 flex flex-col justify-between space-y-3 bg-[#c9bcad]/10 border-t border-[#c9bcad]/60">
                 <p className="text-xs text-[#4a433d] font-medium line-clamp-2 leading-relaxed">
                   {post.caption}
@@ -286,14 +229,6 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({
                   <span className="text-[#aa907d] font-semibold">
                     @{CLINIC_INFO.instagramHandle}
                   </span>
-                  <button
-                    onClick={() => triggerUploadForPost(post.id)}
-                    className="text-[#655d56] hover:text-[#3b3530] font-medium flex items-center gap-1"
-                    title="Substituir foto deste post"
-                  >
-                    <Upload className="w-3 h-3 text-[#aa907d]" />
-                    <span>Trocar</span>
-                  </button>
                 </div>
               </div>
 
@@ -397,111 +332,28 @@ export const InstagramGallery: React.FC<InstagramGalleryProps> = ({
 
                   <button
                     onClick={() => handleCopyShare(activeModalPost.instagramUrl)}
-                    className="flex items-center gap-1 text-[#aa907d] hover:underline"
+                    className="flex items-center gap-1 text-[#aa907d] hover:underline cursor-pointer"
                   >
                     {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Share2 className="w-3.5 h-3.5" />}
                     <span>{copiedLink ? 'Link copiado!' : 'Compartilhar'}</span>
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-2">
+                <div className="pt-2">
                   <button
                     onClick={() => {
                       setActiveModalPost(null);
                       onOpenBooking();
                     }}
-                    className="w-full py-2.5 bg-[#aa907d] hover:bg-[#967e6c] text-[#f4f3eb] font-semibold text-xs rounded-xl transition-colors text-center"
+                    className="w-full py-3 bg-[#aa907d] hover:bg-[#967e6c] text-[#f4f3eb] font-semibold text-xs rounded-xl transition-colors text-center cursor-pointer shadow-xs"
                   >
                     Agendar Consulta
                   </button>
-                  <button
-                    onClick={() => triggerUploadForPost(activeModalPost.id)}
-                    className="w-full py-2.5 bg-[#f4f3eb] hover:bg-[#c9bcad]/30 border border-[#c9bcad] text-[#3b3530] font-medium text-xs rounded-xl transition-colors text-center flex items-center justify-center gap-1"
-                  >
-                    <Upload className="w-3.5 h-3.5 text-[#aa907d]" />
-                    <span>Trocar Foto</span>
-                  </button>
                 </div>
               </div>
 
             </div>
 
-          </div>
-        </div>
-      )}
-
-      {/* Direct Photos Manager Modal */}
-      {uploadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2c2724]/80 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-[#f4f3eb] rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl border-2 border-[#c9bcad] space-y-5">
-            <div className="flex items-center justify-between border-b border-[#c9bcad] pb-4">
-              <div className="flex items-center gap-2">
-                <Camera className="w-5 h-5 text-[#aa907d]" />
-                <h3 className="font-serif text-xl font-bold text-[#3b3530]">Gerenciador das 6 Fotos</h3>
-              </div>
-              <button
-                onClick={() => setUploadModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-[#c9bcad]/30 text-[#655d56]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-[#655d56] leading-relaxed">
-              Você pode carregar as fotos originais do Instagram do seu computador diretamente para o site. A primeira foto é o <strong>destaque principal</strong> do site (Hero e Sobre).
-            </p>
-
-            <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-              {posts.map((p, index) => (
-                <div 
-                  key={p.id}
-                  className={`flex items-center justify-between p-3 rounded-xl border ${
-                    index === 0 ? 'bg-[#aa907d]/15 border-[#aa907d]' : 'bg-[#c9bcad]/20 border-[#c9bcad]'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <img 
-                      src={p.imageUrl} 
-                      alt="" 
-                      className="w-12 h-12 rounded-lg object-cover border border-[#c9bcad]" 
-                    />
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-xs text-[#3b3530]">
-                          Foto {index + 1}: {p.procedureTag}
-                        </span>
-                        {index === 0 && (
-                          <span className="bg-[#aa907d] text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
-                            DESTAQUE
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-[#655d56] line-clamp-1 max-w-[240px]">
-                        {p.caption}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => triggerUploadForPost(p.id)}
-                    className="px-3 py-1.5 bg-[#f4f3eb] hover:bg-[#aa907d] hover:text-[#f4f3eb] text-[#3b3530] text-xs font-semibold rounded-lg border border-[#c9bcad] transition-colors flex items-center gap-1"
-                  >
-                    <Upload className="w-3 h-3 text-[#aa907d]" />
-                    <span>Upload</span>
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-3 border-t border-[#c9bcad] flex items-center justify-between text-xs">
-              <span className="text-[#ada49c]">Salvo localmente no navegador</span>
-              <button
-                onClick={() => setUploadModalOpen(false)}
-                className="px-5 py-2 bg-[#aa907d] text-[#f4f3eb] rounded-full font-semibold hover:bg-[#967e6c] transition-colors"
-              >
-                Concluir
-              </button>
-            </div>
           </div>
         </div>
       )}

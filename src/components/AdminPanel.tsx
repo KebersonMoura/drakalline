@@ -37,7 +37,8 @@ import {
   Upload,
   MapPin,
   LogOut,
-  User
+  User,
+  Smartphone
 } from 'lucide-react';
 import { 
   Appointment, 
@@ -1360,7 +1361,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             Slides do Carrossel do Topo
                           </h4>
                           <p className="text-xs text-stone-500">
-                            Gerencie as fotos, títulos, textos e botões dos slides que rotacionam no topo da página.
+                            Tempo de 30 segundos por slide. No mobile, as fotos contam com enquadramento otimizado e transição suave da direita para a esquerda.
                           </p>
                         </div>
                       </div>
@@ -1449,9 +1450,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                           {/* Content summary */}
                           <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                            <p className="text-xs text-stone-600 line-clamp-2">
-                              {s.subtitle || 'Sem descrição cadastrada.'}
-                            </p>
+                            <div>
+                              <p className="text-xs text-stone-600 line-clamp-2">
+                                {s.subtitle || 'Sem descrição cadastrada.'}
+                              </p>
+                              
+                              {/* Mobile Status Tag */}
+                              <div className="mt-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-stone-100 border border-stone-200/80 text-[11px]">
+                                <Smartphone className="w-3.5 h-3.5 text-[#aa907d] shrink-0" />
+                                {s.mobileImageUrl ? (
+                                  <span className="text-stone-700 truncate">
+                                    <strong className="font-semibold text-emerald-800">Foto Mobile ativa</strong>
+                                    {s.mobileSubtitle ? ` • “${s.mobileSubtitle.slice(0, 32)}...”` : ' • Msg padrão'}
+                                  </span>
+                                ) : (
+                                  <span className="text-stone-500 truncate">
+                                    <span className="text-stone-600">Mobile:</span> Usa imagem do desktop
+                                  </span>
+                                )}
+                              </div>
+                            </div>
 
                             <div className="flex items-center justify-between pt-2 border-t border-stone-200/60 text-[11px] text-stone-500">
                               <span className="font-medium">Botão 1: {s.ctaText || 'Agendar Consulta'}</span>

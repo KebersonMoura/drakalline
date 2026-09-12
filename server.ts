@@ -1047,6 +1047,9 @@ const DEFAULT_SLIDES = [
     subtitle: 'Avaliação minuciosa com tricoscopia digital de alta resolução, tratamentos individualizados para queda de cabelo e restauração capilar com máxima naturalidade.',
     quote: '“Para um diagnóstico preciso.”',
     imageUrl: 'https://images.unsplash.com/photo-1594824813589-32e6a715f5f3?auto=format&fit=crop&w=1400&q=85',
+    mobileImageUrl: 'https://images.unsplash.com/photo-1594824813589-32e6a715f5f3?auto=format&fit=crop&w=800&q=85',
+    mobileTitle: 'Especialista em Saúde e Restauração Capilar',
+    mobileSubtitle: 'Avaliação minuciosa e tratamentos individualizados para queda de cabelo.',
     ctaText: 'Agendar Consulta',
     ctaLink: '#agendamento',
     secondaryCtaText: 'Falar no WhatsApp',
@@ -1061,6 +1064,9 @@ const DEFAULT_SLIDES = [
     subtitle: 'Mapeamento folicular computadorizado em tempo real para diagnosticar a causa exata da queda capilar antes de iniciar qualquer protocolo terapêutico.',
     quote: '“Entender a causa é a chave do tratamento definitivo.”',
     imageUrl: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1400&q=85',
+    mobileImageUrl: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=800&q=85',
+    mobileTitle: 'Tricoscopia Digital de Alta Resolução',
+    mobileSubtitle: 'Mapeamento computadorizado para identificar a causa exata da queda de cabelo.',
     ctaText: 'Conhecer o Diagnóstico',
     ctaLink: '#diagnostico',
     secondaryCtaText: 'Agendar Avaliação',
@@ -1075,6 +1081,9 @@ const DEFAULT_SLIDES = [
     subtitle: 'Microinfusão de medicamentos na derme e bioestimulação com lasers para interromper o afinamento folicular e estimular novos fios fortes.',
     quote: '“Resultados visíveis com protocolos médicos personalizados.”',
     imageUrl: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=1400&q=85',
+    mobileImageUrl: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=800&q=85',
+    mobileTitle: 'MMP® e Regeneração Capilar',
+    mobileSubtitle: 'Microinfusão e lasers para fortalecer fios e estimular o crescimento.',
     ctaText: 'Ver Procedimentos',
     ctaLink: '#procedimentos',
     secondaryCtaText: 'Falar no WhatsApp',
@@ -1113,6 +1122,9 @@ async function ensureSlidesTable(pool: any) {
         subtitle TEXT NOT NULL,
         quote VARCHAR(255),
         image_url LONGTEXT NOT NULL,
+        mobile_image_url LONGTEXT NULL,
+        mobile_title VARCHAR(255) NULL,
+        mobile_subtitle TEXT NULL,
         cta_text VARCHAR(100) DEFAULT 'Agendar Consulta',
         cta_link VARCHAR(255) DEFAULT '#agendamento',
         secondary_cta_text VARCHAR(100) DEFAULT 'Falar no WhatsApp',
@@ -1125,14 +1137,26 @@ async function ensureSlidesTable(pool: any) {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // Ensure mobile columns exist if table was already created earlier
+    try {
+      await pool.query('ALTER TABLE hero_slides ADD COLUMN mobile_image_url LONGTEXT NULL');
+    } catch (_) {}
+    try {
+      await pool.query('ALTER TABLE hero_slides ADD COLUMN mobile_title VARCHAR(255) NULL');
+    } catch (_) {}
+    try {
+      await pool.query('ALTER TABLE hero_slides ADD COLUMN mobile_subtitle TEXT NULL');
+    } catch (_) {}
+
     const [rows]: any = await pool.query('SELECT COUNT(*) as cnt FROM hero_slides');
     if (rows[0]?.cnt === 0) {
       for (const s of DEFAULT_SLIDES) {
         await pool.query(`
-          INSERT INTO hero_slides (id, badge, title, subtitle, quote, image_url, cta_text, cta_link, secondary_cta_text, secondary_cta_link, slide_order, is_active)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO hero_slides (id, badge, title, subtitle, quote, image_url, mobile_image_url, mobile_title, mobile_subtitle, cta_text, cta_link, secondary_cta_text, secondary_cta_link, slide_order, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           s.id, s.badge, s.title, s.subtitle, s.quote || '', s.imageUrl,
+          s.mobileImageUrl || '', s.mobileTitle || '', s.mobileSubtitle || '',
           s.ctaText, s.ctaLink, s.secondaryCtaText || '', s.secondaryCtaLink || '',
           s.order, s.isActive
         ]);
@@ -1163,6 +1187,9 @@ app.get('/api/slides', async (req, res) => {
       subtitle: r.subtitle,
       quote: r.quote || '',
       imageUrl: r.image_url,
+      mobileImageUrl: r.mobile_image_url || '',
+      mobileTitle: r.mobile_title || '',
+      mobileSubtitle: r.mobile_subtitle || '',
       ctaText: r.cta_text || 'Agendar Consulta',
       ctaLink: r.cta_link || '#agendamento',
       secondaryCtaText: r.secondary_cta_text || 'Falar no WhatsApp',
@@ -1187,6 +1214,9 @@ app.post('/api/slides', async (req, res) => {
     subtitle,
     quote,
     imageUrl,
+    mobileImageUrl,
+    mobileTitle,
+    mobileSubtitle,
     ctaText,
     ctaLink,
     secondaryCtaText,
@@ -1206,6 +1236,9 @@ app.post('/api/slides', async (req, res) => {
     subtitle: subtitle || '',
     quote: quote || '',
     imageUrl,
+    mobileImageUrl: mobileImageUrl || '',
+    mobileTitle: mobileTitle || '',
+    mobileSubtitle: mobileSubtitle || '',
     ctaText: ctaText || 'Agendar Consulta',
     ctaLink: ctaLink || '#agendamento',
     secondaryCtaText: secondaryCtaText || 'Falar no WhatsApp',
@@ -1219,11 +1252,13 @@ app.post('/api/slides', async (req, res) => {
     try {
       await ensureSlidesTable(pool);
       await pool.query(`
-        INSERT INTO hero_slides (id, badge, title, subtitle, quote, image_url, cta_text, cta_link, secondary_cta_text, secondary_cta_link, slide_order, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO hero_slides (id, badge, title, subtitle, quote, image_url, mobile_image_url, mobile_title, mobile_subtitle, cta_text, cta_link, secondary_cta_text, secondary_cta_link, slide_order, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         newSlide.id, newSlide.badge, newSlide.title, newSlide.subtitle,
-        newSlide.quote, newSlide.imageUrl, newSlide.ctaText, newSlide.ctaLink,
+        newSlide.quote, newSlide.imageUrl, newSlide.mobileImageUrl,
+        newSlide.mobileTitle, newSlide.mobileSubtitle,
+        newSlide.ctaText, newSlide.ctaLink,
         newSlide.secondaryCtaText, newSlide.secondaryCtaLink, newSlide.order,
         newSlide.isActive
       ]);
@@ -1247,6 +1282,9 @@ app.put('/api/slides/:id', async (req, res) => {
     subtitle,
     quote,
     imageUrl,
+    mobileImageUrl,
+    mobileTitle,
+    mobileSubtitle,
     ctaText,
     ctaLink,
     secondaryCtaText,
@@ -1262,11 +1300,13 @@ app.put('/api/slides/:id', async (req, res) => {
       await pool.query(`
         UPDATE hero_slides
         SET badge = ?, title = ?, subtitle = ?, quote = ?, image_url = ?,
+            mobile_image_url = ?, mobile_title = ?, mobile_subtitle = ?,
             cta_text = ?, cta_link = ?, secondary_cta_text = ?, secondary_cta_link = ?,
             slide_order = ?, is_active = ?, updated_at = NOW()
         WHERE id = ?
       `, [
         badge, title, subtitle, quote || '', imageUrl,
+        mobileImageUrl || '', mobileTitle || '', mobileSubtitle || '',
         ctaText, ctaLink, secondaryCtaText || '', secondaryCtaLink || '',
         order ?? 0, isActive !== false, id
       ]);
@@ -1284,6 +1324,9 @@ app.put('/api/slides/:id', async (req, res) => {
         subtitle: subtitle ?? s.subtitle,
         quote: quote ?? s.quote,
         imageUrl: imageUrl ?? s.imageUrl,
+        mobileImageUrl: mobileImageUrl !== undefined ? mobileImageUrl : s.mobileImageUrl,
+        mobileTitle: mobileTitle !== undefined ? mobileTitle : s.mobileTitle,
+        mobileSubtitle: mobileSubtitle !== undefined ? mobileSubtitle : s.mobileSubtitle,
         ctaText: ctaText ?? s.ctaText,
         ctaLink: ctaLink ?? s.ctaLink,
         secondaryCtaText: secondaryCtaText ?? s.secondaryCtaText,

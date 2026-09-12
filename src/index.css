@@ -21,3 +21,30 @@ body {
   color: #3b3530;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
+
+@keyframes panRightToLeft {
+  0% {
+    transform: scale(1.12) translateX(4%);
+  }
+  100% {
+    transform: scale(1.12) translateX(-4%);
+  }
+}
+
+.animate-pan-mobile {
+  animation: panRightToLeft 30s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+@keyframes slideProgress {
+  0% {
+    width: 0%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+.animate-slide-progress {
+  animation: slideProgress 30s linear forwards;
+}

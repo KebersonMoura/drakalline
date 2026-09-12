@@ -135,6 +135,10 @@ export interface HeroSlide {
   subtitle: string;
   quote?: string;
   imageUrl: string;
+  // Mobile-specific customizations
+  mobileImageUrl?: string;
+  mobileTitle?: string;
+  mobileSubtitle?: string;
   ctaText: string;
   ctaLink: string;
   secondaryCtaText?: string;

@@ -67,13 +67,16 @@ export const TopHeroCarousel: React.FC<TopHeroCarouselProps> = ({
     };
   }, []);
 
-  // Auto-play interval - rolls vertically
+  // 30 seconds per slide as requested
+  const SLIDE_DURATION_MS = 30000;
+
+  // Auto-play interval - rolls vertically every 30 seconds
   useEffect(() => {
     if (isPaused || slides.length <= 1) return;
 
     const timer = setInterval(() => {
       setCurrentIndex(prev => (prev + 1) % slides.length);
-    }, 6500);
+    }, SLIDE_DURATION_MS);
 
     return () => clearInterval(timer);
   }, [isPaused, slides.length]);
@@ -122,31 +125,94 @@ export const TopHeroCarousel: React.FC<TopHeroCarouselProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {/* Viewport Window - Fixed responsive height with hidden overflow */}
-      <div className="relative h-[600px] sm:h-[640px] lg:h-[700px] w-full overflow-hidden">
+      <div className="relative h-[560px] sm:h-[640px] lg:h-[700px] w-full overflow-hidden">
         
+        {/* 30-Second Continuous Progress Bar */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-white/15 z-30 overflow-hidden pointer-events-none">
+          <div 
+            key={`${currentIndex}-${isPaused}`}
+            className={`h-full bg-gradient-to-r from-[#aa907d] to-[#d6c7ba] ${isPaused ? '' : 'animate-slide-progress'}`}
+            style={{
+              animationPlayState: isPaused ? 'paused' : 'running'
+            }}
+          />
+        </div>
+
         {/* Vertical Rolling Track */}
         <div 
           className="w-full h-full transition-transform duration-700 ease-[cubic-bezier(0.25,1,0.5,1)] flex flex-col"
           style={{ transform: `translateY(-${currentIndex * 100}%)` }}
         >
-          {slides.map((slide, index) => {
+          {slides.map((slide) => {
+            const mobileImage = slide.mobileImageUrl || slide.imageUrl;
+            const mobileTitle = slide.mobileTitle || slide.title;
+            const mobileMessage = slide.mobileSubtitle || slide.subtitle;
+
             return (
               <div
                 key={slide.id}
                 className="w-full h-full shrink-0 relative flex items-center bg-[#1c1815] overflow-hidden"
               >
-                {/* Background Image - Clean with no dark shadow overlay on top */}
+                {/* Background Image: Mobile vs Desktop */}
                 <div className="absolute inset-0 z-0 bg-[#1c1815]">
+                  {/* Mobile Image (Visible on screen < sm) - Enquadrada puxada da direita para esquerda com movimento suave */}
+                  <div className="w-full h-full sm:hidden overflow-hidden">
+                    <img
+                      src={mobileImage}
+                      alt={mobileTitle}
+                      className="w-full h-full object-cover object-[72%_center] animate-pan-mobile will-change-transform"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  {/* Desktop Image (Visible on screen >= sm) */}
                   <img
                     src={slide.imageUrl}
                     alt={slide.title}
-                    className="w-full h-full object-cover object-center"
+                    className="w-full h-full object-cover object-center hidden sm:block"
                     referrerPolicy="no-referrer"
                   />
+                  {/* Mobile subtle gradient overlay for pristine contrast */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-stone-950/90 via-stone-950/35 to-transparent sm:hidden" />
                 </div>
 
-                {/* Content Layer (Rolls vertically together with the slide) */}
-                <div className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-16">
+                {/* MOBILE VIEW: Minimal layout displaying ONLY Title and Short Message */}
+                <div className="sm:hidden relative z-10 w-full px-5 py-6 mt-auto flex flex-col justify-end">
+                  <div className="space-y-3 p-5 rounded-3xl bg-black/55 backdrop-blur-md border border-white/15 shadow-2xl text-left">
+                    {/* Only Title */}
+                    <h2 className="font-serif text-2xl font-bold text-[#f4f3eb] leading-snug tracking-tight drop-shadow-sm">
+                      {mobileTitle}
+                    </h2>
+
+                    {/* Only Short Message */}
+                    <p className="text-xs text-[#dcd7cf] leading-relaxed font-normal drop-shadow-xs line-clamp-3">
+                      {mobileMessage}
+                    </p>
+
+                    {/* Compact Mobile Action Button */}
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (slide.ctaLink?.startsWith('#')) {
+                            const el = document.querySelector(slide.ctaLink);
+                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                            else onOpenBooking();
+                          } else {
+                            onOpenBooking();
+                          }
+                        }}
+                        className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-[#aa907d] active:scale-95 text-[#f4f3eb] font-medium text-xs rounded-full shadow-md transition-all cursor-pointer"
+                      >
+                        <Calendar className="w-3.5 h-3.5 text-[#f4f3eb]" />
+                        <span>{slide.ctaText || 'Agendar Consulta'}</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-[#c9bcad]" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DESKTOP VIEW: Full rich presentation with badges, quote, dual CTAs, and micro highlights */}
+                <div className="hidden sm:block relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-16">
                   <div className="max-w-3xl space-y-5 sm:space-y-6 p-6 sm:p-8 rounded-3xl bg-black/35 backdrop-blur-md border border-white/10 shadow-2xl">
                     
                     {/* Badge Tag */}
@@ -306,10 +372,11 @@ export const TopHeroCarousel: React.FC<TopHeroCarouselProps> = ({
         </div>
 
         {/* Counter Badge (Bottom Left) */}
-        <div className="absolute bottom-6 left-4 sm:left-8 z-30 flex items-center gap-2 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-xs font-mono text-stone-300">
+        <div className="absolute bottom-6 left-4 sm:left-8 z-30 flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/15 text-xs font-mono text-stone-300 shadow-md">
           <span className="text-[#aa907d] font-bold">0{currentIndex + 1}</span>
           <span className="opacity-40">/</span>
           <span>0{slides.length}</span>
+          <span className="text-[10px] text-stone-400 pl-1 border-l border-white/20 font-sans tracking-wide">30s</span>
         </div>
 
       </div>

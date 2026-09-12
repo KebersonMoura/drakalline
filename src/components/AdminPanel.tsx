@@ -156,6 +156,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newCliBirthDate, setNewCliBirthDate] = useState<string>('');
   const [newCliAllergies, setNewCliAllergies] = useState<string>('Nenhuma alergia conhecida');
   const [newCliGoals, setNewCliGoals] = useState<string>('');
+  const [newCliMedicalNotes, setNewCliMedicalNotes] = useState<string>('');
+
+  // Edit Client Anamnesis & Clinical Notes
+  const [isEditingClientAnamnesis, setIsEditingClientAnamnesis] = useState<boolean>(false);
+  const [editClientAllergies, setEditClientAllergies] = useState<string>('');
+  const [editClientGoals, setEditClientGoals] = useState<string>('');
+  const [editClientMedicalNotes, setEditClientMedicalNotes] = useState<string>('');
+  const [isSavingClientAnamnesis, setIsSavingClientAnamnesis] = useState<boolean>(false);
+  const [clientAnamnesisSuccessMsg, setClientAnamnesisSuccessMsg] = useState<string>('');
 
   // Database Connection form
   const [inputDbUrl, setInputDbUrl] = useState<string>('');
@@ -396,12 +405,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       firstVisitDate: new Date().toISOString().split('T')[0],
       allergies: newCliAllergies,
       aestheticGoals: newCliGoals,
+      medicalNotes: newCliMedicalNotes,
       history: []
     });
 
     setNewCliName('');
     setNewCliPhone('');
     setNewCliEmail('');
+    setNewCliBirthDate('');
+    setNewCliAllergies('Nenhuma alergia conhecida');
+    setNewCliGoals('');
+    setNewCliMedicalNotes('');
     setShowAddClientModal(false);
     loadAllData();
     setSelectedClient(newClient);
@@ -429,6 +443,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setShowAddProcedureHistory(false);
     setNewHistNotes('');
     onDataChanged();
+  };
+
+  const handleStartEditAnamnesis = () => {
+    if (!selectedClient) return;
+    setEditClientAllergies(selectedClient.allergies || '');
+    setEditClientGoals(selectedClient.aestheticGoals || '');
+    setEditClientMedicalNotes(selectedClient.medicalNotes || '');
+    setIsEditingClientAnamnesis(true);
+  };
+
+  const handleSaveClientAnamnesis = () => {
+    if (!selectedClient) return;
+    setIsSavingClientAnamnesis(true);
+    const updated = storageService.updateClient(selectedClient.id, {
+      allergies: editClientAllergies,
+      aestheticGoals: editClientGoals,
+      medicalNotes: editClientMedicalNotes
+    });
+    if (updated) {
+      setSelectedClient(updated);
+      setClients(storageService.getClients());
+      setClientAnamnesisSuccessMsg('Informações clínicas salvas no prontuário com sucesso!');
+      setTimeout(() => setClientAnamnesisSuccessMsg(''), 4000);
+      onDataChanged();
+    }
+    setIsSavingClientAnamnesis(false);
+    setIsEditingClientAnamnesis(false);
   };
 
   // Database credential configuration
@@ -1230,11 +1271,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   {selectedClient ? (
                     <div className="bg-stone-50 rounded-3xl p-6 border border-stone-200 space-y-6 animate-in slide-in-from-right-4 duration-200">
                       
-                      <div className="flex items-start justify-between border-b border-stone-200 pb-4">
+                      {/* Success Toast */}
+                      {clientAnamnesisSuccessMsg && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>{clientAnamnesisSuccessMsg}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setClientAnamnesisSuccessMsg('')}
+                            className="text-emerald-700 hover:text-emerald-900 font-bold ml-2 cursor-pointer"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      )}
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-200 pb-4">
                         <div>
                           <button
-                            onClick={() => setSelectedClient(null)}
-                            className="text-xs text-amber-800 hover:underline mb-2 block font-medium"
+                            onClick={() => {
+                              setSelectedClient(null);
+                              setIsEditingClientAnamnesis(false);
+                            }}
+                            className="text-xs text-amber-800 hover:underline mb-2 block font-medium cursor-pointer"
                           >
                             ← Voltar para lista de clientes
                           </button>
@@ -1258,29 +1319,227 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => setShowAddProcedureHistory(true)}
-                          className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs cursor-pointer"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>+ Registrar Procedimento</span>
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {!isEditingClientAnamnesis ? (
+                            <button
+                              type="button"
+                              onClick={handleStartEditAnamnesis}
+                              className="px-3.5 py-2 bg-white hover:bg-stone-100 text-stone-800 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer border border-stone-200 shadow-2xs"
+                              title="Editar Alergias, Objetivos Estéticos e Medicação de Uso Contínuo"
+                            >
+                              <Edit className="w-3.5 h-3.5 text-amber-800" />
+                              <span>Editar Informações Clínicas</span>
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setIsEditingClientAnamnesis(false)}
+                                className="px-3.5 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleSaveClientAnamnesis}
+                                disabled={isSavingClientAnamnesis}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>{isSavingClientAnamnesis ? 'Salvando...' : 'Salvar Alterações'}</span>
+                              </button>
+                            </div>
+                          )}
+
+                          <button
+                            onClick={() => setShowAddProcedureHistory(true)}
+                            className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-xs cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>+ Registrar Procedimento</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Anamnesis and Notes Cards */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                        <div className="p-4 bg-white rounded-2xl border border-stone-200/80 space-y-1">
-                          <span className="font-bold text-stone-800 block">Alergias & Sensibilidades:</span>
-                          <p className="text-stone-600">{selectedClient.allergies || 'Nenhuma informada'}</p>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
+                            Anamnese & Avaliação Clínica
+                          </span>
+                          {!isEditingClientAnamnesis && (
+                            <button
+                              type="button"
+                              onClick={handleStartEditAnamnesis}
+                              className="text-xs text-amber-800 hover:text-amber-900 font-semibold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                              <span>Editar campos</span>
+                            </button>
+                          )}
                         </div>
-                        <div className="p-4 bg-white rounded-2xl border border-stone-200/80 space-y-1">
-                          <span className="font-bold text-stone-800 block">Objetivos Estéticos:</span>
-                          <p className="text-stone-600">{selectedClient.aestheticGoals || 'Rejuvenescimento e contorno'}</p>
-                        </div>
-                        <div className="p-4 bg-white rounded-2xl border border-stone-200/80 space-y-1">
-                          <span className="font-bold text-stone-800 block">Anotações Médicas:</span>
-                          <p className="text-stone-600">{selectedClient.medicalNotes || 'Paciente com ótima aderência aos cuidados.'}</p>
-                        </div>
+
+                        {!isEditingClientAnamnesis ? (
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                            <div className="p-4 bg-white rounded-2xl border border-stone-200/80 space-y-1.5 relative group">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-stone-800 block">Alergias & Sensibilidades:</span>
+                                <button
+                                  type="button"
+                                  onClick={handleStartEditAnamnesis}
+                                  className="text-stone-400 hover:text-amber-800 transition-colors p-1 rounded-md hover:bg-stone-50 cursor-pointer"
+                                  title="Editar Alergias & Sensibilidades"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <p className="text-stone-600 whitespace-pre-wrap leading-relaxed font-sans">
+                                {selectedClient.allergies || 'Nenhuma informada'}
+                              </p>
+                            </div>
+
+                            <div className="p-4 bg-white rounded-2xl border border-stone-200/80 space-y-1.5 relative group">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-stone-800 block">Objetivos Estéticos:</span>
+                                <button
+                                  type="button"
+                                  onClick={handleStartEditAnamnesis}
+                                  className="text-stone-400 hover:text-amber-800 transition-colors p-1 rounded-md hover:bg-stone-50 cursor-pointer"
+                                  title="Editar Objetivos Estéticos"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <p className="text-stone-600 whitespace-pre-wrap leading-relaxed font-sans">
+                                {selectedClient.aestheticGoals || 'Rejuvenescimento e contorno'}
+                              </p>
+                            </div>
+
+                            <div className="p-4 bg-white rounded-2xl border border-stone-200/80 space-y-1.5 relative group">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-stone-800 block">Medicação de Uso Contínuo:</span>
+                                <button
+                                  type="button"
+                                  onClick={handleStartEditAnamnesis}
+                                  className="text-stone-400 hover:text-amber-800 transition-colors p-1 rounded-md hover:bg-stone-50 cursor-pointer"
+                                  title="Editar Medicação de Uso Contínuo"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <p className="text-stone-600 whitespace-pre-wrap leading-relaxed font-sans">
+                                {selectedClient.medicalNotes || 'Nenhuma informada'}
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          /* EDITING MODE */
+                          <div className="bg-white p-5 rounded-2xl border-2 border-amber-300 shadow-sm space-y-4 text-xs">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-stone-100 gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+                                <h6 className="font-bold text-stone-900 text-sm">Editando Informações Clínicas & Anamnese</h6>
+                              </div>
+                              <span className="text-[11px] text-stone-400">Suporta quebra de linha com a tecla Enter em todos os campos</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              {/* 1. Alergias & Sensibilidades */}
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <label className="font-bold text-stone-800 block">
+                                    Alergias & Sensibilidades:
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditClientAllergies(prev => prev ? prev + '\n' : '\n')}
+                                    className="text-[10px] text-amber-800 hover:text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 cursor-pointer"
+                                    title="Inserir quebra de linha"
+                                  >
+                                    + Linha
+                                  </button>
+                                </div>
+                                <textarea
+                                  rows={4}
+                                  value={editClientAllergies}
+                                  onChange={(e) => setEditClientAllergies(e.target.value.replace(/\\n/g, '\n'))}
+                                  placeholder="ex: Alergia a anestésico tópico, sensibilidade a látex..."
+                                  className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl whitespace-pre-wrap font-sans text-xs focus:bg-white focus:border-amber-600 focus:outline-none transition-colors resize-y leading-relaxed min-h-[90px]"
+                                  style={{ whiteSpace: 'pre-wrap' }}
+                                />
+                              </div>
+
+                              {/* 2. Objetivos Estéticos */}
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <label className="font-bold text-stone-800 block">
+                                    Objetivos Estéticos:
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditClientGoals(prev => prev ? prev + '\n' : '\n')}
+                                    className="text-[10px] text-amber-800 hover:text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 cursor-pointer"
+                                    title="Inserir quebra de linha"
+                                  >
+                                    + Linha
+                                  </button>
+                                </div>
+                                <textarea
+                                  rows={4}
+                                  value={editClientGoals}
+                                  onChange={(e) => setEditClientGoals(e.target.value.replace(/\\n/g, '\n'))}
+                                  placeholder="ex: Rejuvenescimento da linha frontal, contorno mandibular..."
+                                  className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl whitespace-pre-wrap font-sans text-xs focus:bg-white focus:border-amber-600 focus:outline-none transition-colors resize-y leading-relaxed min-h-[90px]"
+                                  style={{ whiteSpace: 'pre-wrap' }}
+                                />
+                              </div>
+
+                              {/* 3. Medicação de Uso Contínuo */}
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <label className="font-bold text-stone-800 block">
+                                    Medicação de Uso Contínuo:
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditClientMedicalNotes(prev => prev ? prev + '\n' : '\n')}
+                                    className="text-[10px] text-amber-800 hover:text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 cursor-pointer"
+                                    title="Inserir quebra de linha"
+                                  >
+                                    + Linha
+                                  </button>
+                                </div>
+                                <textarea
+                                  rows={4}
+                                  value={editClientMedicalNotes}
+                                  onChange={(e) => setEditClientMedicalNotes(e.target.value.replace(/\\n/g, '\n'))}
+                                  placeholder="ex: Anti-hipertensivo, anticoncepcional, finasterida, minoxidil oral..."
+                                  className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl whitespace-pre-wrap font-sans text-xs focus:bg-white focus:border-amber-600 focus:outline-none transition-colors resize-y leading-relaxed min-h-[90px]"
+                                  style={{ whiteSpace: 'pre-wrap' }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100">
+                              <button
+                                type="button"
+                                onClick={() => setIsEditingClientAnamnesis(false)}
+                                className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl font-semibold transition-colors cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleSaveClientAnamnesis}
+                                disabled={isSavingClientAnamnesis}
+                                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                              >
+                                <Check className="w-4 h-4" />
+                                <span>{isSavingClientAnamnesis ? 'Salvando...' : 'Salvar Alterações'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Procedure History Timeline */}
@@ -1319,9 +1578,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 </div>
 
                                 <div className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-2.5 rounded-xl border border-stone-100">
-                                  <p>{hist.notes}</p>
+                                  <p className="whitespace-pre-wrap font-sans break-words text-stone-700 leading-relaxed">
+                                    {hist.notes ? hist.notes.replace(/\\n/g, '\n') : ''}
+                                  </p>
                                   {hist.lotNumber && (
-                                    <span className="block text-[10px] text-stone-400 font-mono mt-1">
+                                    <span className="block text-[10px] text-stone-400 font-mono mt-2 pt-1.5 border-t border-stone-200/60">
                                       Lote rastreável: {hist.lotNumber}
                                     </span>
                                   )}
@@ -1339,7 +1600,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       {filteredClients.map((c) => (
                         <div
                           key={c.id}
-                          onClick={() => setSelectedClient(c)}
+                          onClick={() => {
+                            setSelectedClient(c);
+                            setIsEditingClientAnamnesis(false);
+                          }}
                           className="p-5 bg-stone-50 rounded-2xl border border-stone-200/80 hover:border-amber-700/50 hover:bg-amber-50/20 shadow-2xs transition-all cursor-pointer space-y-3 flex flex-col justify-between"
                         >
                           <div>
@@ -1724,7 +1988,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         {/* Procedure Image */}
                         <div className="relative aspect-16/10 overflow-hidden bg-stone-900">
                           <img
-                            src={proc.imageUrl}
+                            src={proc.imageUrl?.startsWith('uploads/') ? `/${proc.imageUrl}` : proc.imageUrl}
                             alt={proc.title}
                             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             referrerPolicy="no-referrer"
@@ -2219,14 +2483,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <div>
-                <label className="font-semibold text-stone-700 block mb-1">Anotações Clínicas & Vetores:</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-semibold text-stone-700 block">Anotações Clínicas & Vetores:</label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewHistNotes(prev => prev ? prev + '\n' : '\n')}
+                      className="text-[11px] text-amber-800 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200 font-medium transition-colors cursor-pointer"
+                      title="Inserir quebra de linha no texto"
+                    >
+                      + Quebra de Linha
+                    </button>
+                    <span className="text-[10px] text-stone-400 hidden sm:inline">(Enter quebra linha)</span>
+                  </div>
+                </div>
                 <textarea
-                  rows={3}
+                  rows={5}
                   required
-                  placeholder="Quantidade de unidades, técnica empregada (agulha/cânula), recomendações dadas..."
+                  placeholder={'Quantidade de unidades, técnica empregada (agulha/cânula), recomendações dadas...\nExemplo:\n• Ponto 1: 4U\n• Ponto 2: 2U\n• Recomendações: Não deitar nas próximas 4 horas.'}
                   value={newHistNotes}
-                  onChange={(e) => setNewHistNotes(e.target.value)}
-                  className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl"
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\\n/g, '\n');
+                    setNewHistNotes(val);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      // Ensure Enter creates a line break and does NOT submit the parent form
+                      e.stopPropagation();
+                    }
+                  }}
+                  className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl whitespace-pre-wrap font-sans text-xs leading-relaxed focus:bg-white focus:border-amber-600 focus:outline-none transition-colors min-h-[110px] resize-y"
+                  style={{ whiteSpace: 'pre-wrap' }}
                 />
               </div>
 
@@ -2323,6 +2610,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   value={newCliGoals}
                   onChange={(e) => setNewCliGoals(e.target.value)}
                   placeholder="ex: Suavizar pés de galinha e volumizar lábio superior"
+                  className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-stone-700 block mb-1">Medicação de Uso Contínuo:</label>
+                <textarea
+                  rows={2}
+                  value={newCliMedicalNotes}
+                  onChange={(e) => setNewCliMedicalNotes(e.target.value)}
+                  placeholder="ex: Nenhuma, anti-hipertensivo, anticoncepcional, finasterida..."
                   className="w-full p-2.5 bg-stone-50 border border-stone-200 rounded-xl"
                 />
               </div>

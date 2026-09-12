@@ -301,7 +301,7 @@ export const INITIAL_CLIENTS: ClientRecord[] = [
     allergies: 'Nenhuma alergia conhecida a medicamentos',
     contraindications: 'Nenhuma',
     aestheticGoals: 'Restauração capilar da linha frontal e controle da calvície androgenética',
-    medicalNotes: 'Tricoscopia mostrou miniaturização em vértex e região frontal. Paciente em protocolo de MMP e finasterida tópica com excelente resposta.',
+    medicalNotes: 'Finasterida 1mg/dia, Minoxidil oral 2.5mg/dia e polivitamínico capilar.',
     history: [
       {
         id: 'hist-1',
@@ -336,7 +336,7 @@ export const INITIAL_CLIENTS: ClientRecord[] = [
     allergies: 'Nenhuma alergia relatada',
     contraindications: 'Nenhuma',
     aestheticGoals: 'Queda pós-covid e afinamento capilar difuso',
-    medicalNotes: 'Quadro de Eflúvio Telógeno associado a ferritina baixa. Tratamento clínico com reposição e laser capilar.',
+    medicalNotes: 'Anticoncepcional oral (desogestrel), suplementação de ferro e biotina.',
     history: [
       {
         id: 'hist-3',

@@ -163,6 +163,16 @@ class StorageService {
     if (index === -1) return null;
     clients[index] = { ...clients[index], ...updates };
     this.saveClients(clients);
+
+    // Sync with server if online
+    try {
+      fetch(`/api/clients/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      }).catch(err => console.warn('Async client update error:', err));
+    } catch (e) {}
+
     return clients[index];
   }
 

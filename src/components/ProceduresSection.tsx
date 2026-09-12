@@ -46,7 +46,7 @@ export const ProceduresSection: React.FC<ProceduresSectionProps> = ({
               {/* Image Frame */}
               <div className="relative aspect-16/10 overflow-hidden bg-[#c9bcad]/20">
                 <img
-                  src={proc.imageUrl}
+                  src={proc.imageUrl?.startsWith('uploads/') ? `/${proc.imageUrl}` : proc.imageUrl}
                   alt={proc.title}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   referrerPolicy="no-referrer"
@@ -104,7 +104,7 @@ export const ProceduresSection: React.FC<ProceduresSectionProps> = ({
             {/* Modal Header Image */}
             <div className="relative aspect-16/9 bg-[#c9bcad]/30 shrink-0">
               <img
-                src={selectedModalProcedure.imageUrl}
+                src={selectedModalProcedure.imageUrl?.startsWith('uploads/') ? `/${selectedModalProcedure.imageUrl}` : selectedModalProcedure.imageUrl}
                 alt={selectedModalProcedure.title}
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"

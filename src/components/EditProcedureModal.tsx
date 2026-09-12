@@ -262,6 +262,11 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
     setSaving(true);
     setErrorMsg('');
 
+    let finalImageUrl = imageUrl.trim();
+    if (finalImageUrl.startsWith('uploads/')) {
+      finalImageUrl = '/' + finalImageUrl;
+    }
+
     const updated: Procedure = {
       id: procedure ? procedure.id : 'proc-' + Date.now(),
       title: title.trim(),
@@ -272,7 +277,7 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
       downtime: downtime.trim() || 'Sem downtime',
       idealFor: idealFor.length > 0 ? idealFor : ['Indicado após avaliação médica'],
       benefits: benefits.length > 0 ? benefits : ['Protocolo médico personalizado'],
-      imageUrl: imageUrl.trim(),
+      imageUrl: finalImageUrl,
       popular,
       faq: procedure?.faq || [
         {
@@ -624,7 +629,7 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
                 <div className="relative aspect-16/10 rounded-xl overflow-hidden bg-stone-900 border border-stone-200">
                   {imageUrl ? (
                     <img
-                      src={imageUrl}
+                      src={imageUrl.startsWith('uploads/') ? `/${imageUrl}` : imageUrl}
                       alt={title || 'Prévia do procedimento'}
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
@@ -645,6 +650,59 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Endereço / URL da Imagem - Sempre visível e gravado no Banco de Dados */}
+              <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                    <LinkIcon className="w-3.5 h-3.5 text-amber-800" />
+                    <span>Endereço da Imagem (Gravado diretamente no Banco de Dados):</span>
+                  </label>
+                  <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    Sincronização MySQL
+                  </span>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={imageUrl}
+                    onChange={(e) => {
+                      let val = e.target.value;
+                      if (val.trim().startsWith('uploads/')) {
+                        val = '/' + val.trim();
+                      }
+                      setImageUrl(val);
+                    }}
+                    onBlur={() => {
+                      let clean = imageUrl.trim();
+                      if (clean.startsWith('uploads/')) {
+                        clean = '/' + clean;
+                      }
+                      setImageUrl(clean);
+                    }}
+                    placeholder="https://exemplo.com/foto.jpg ou /uploads/foto.jpg"
+                    className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 text-stone-900 text-xs font-mono bg-white shadow-2xs focus:border-amber-600 focus:ring-1 focus:ring-amber-600 outline-none"
+                  />
+                  {imageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        let clean = imageUrl.trim();
+                        if (clean.startsWith('uploads/')) clean = '/' + clean;
+                        setImageUrl(clean);
+                      }}
+                      className="px-3 py-2 bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                      title="Recarregar prévia da imagem"
+                    >
+                      Aplicar
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  O endereço acima será gravado no MySQL quando você salvar. Você pode digitar/colar um link direto ou utilizar o upload e as fotos selecionadas abaixo:
+                </p>
               </div>
 
               {/* Source Mode Switcher */}

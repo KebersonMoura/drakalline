@@ -117,5 +117,30 @@
         "question": "Como é realizado o procedimento?"
       }
     ]
+  },
+  {
+    "id": "proc-1789223802788",
+    "title": "exossomos autólogos",
+    "subtitle": "tratamento clinico",
+    "description": "tratamento para queda e crescimento capilar com microagulhamento",
+    "category": "capilar",
+    "duration": "45 a 60 minutos",
+    "downtime": "curto espaço de tempo",
+    "idealFor": [
+      "Queda capilar ou afinamento dos fios"
+    ],
+    "benefits": [
+      "Atendimento médico especializado",
+      "Avaliação e diagnóstico individualizado",
+      "restituição capilar, restruturação de de fios no couro cabeludo"
+    ],
+    "imageUrl": "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=1200&q=80",
+    "popular": true,
+    "faq": [
+      {
+        "answer": "O tratamento é realizado no consultório médico com todo conforto, anestesia tópica quando necessária e acompanhamento minucioso.",
+        "question": "Como é realizado o procedimento?"
+      }
+    ]
   }
 ]

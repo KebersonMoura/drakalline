@@ -395,6 +395,44 @@ app.post('/api/clients/:id/history', async (req, res) => {
   }
 });
 
+app.put('/api/clients/:id', async (req, res) => {
+  const pool = getMySqlPool();
+  const clientId = req.params.id;
+  const { name, phone, email, birthDate, cpf, allergies, aestheticGoals, medicalNotes } = req.body;
+
+  if (pool) {
+    try {
+      await pool.query(
+        `UPDATE clients SET
+           allergies = COALESCE(?, allergies),
+           aesthetic_goals = COALESCE(?, aesthetic_goals),
+           medical_notes = COALESCE(?, medical_notes),
+           name = COALESCE(?, name),
+           phone = COALESCE(?, phone),
+           email = COALESCE(?, email)
+         WHERE id = ?`,
+        [
+          allergies !== undefined ? allergies : null,
+          aestheticGoals !== undefined ? aestheticGoals : null,
+          medicalNotes !== undefined ? medicalNotes : null,
+          name !== undefined ? name : null,
+          phone !== undefined ? phone : null,
+          email !== undefined ? email : null,
+          clientId
+        ]
+      );
+    } catch (err: any) {
+      console.warn('MySQL update client failed:', err.message);
+    }
+  }
+
+  res.json({
+    status: 'success',
+    id: clientId,
+    updates: req.body
+  });
+});
+
 // ----------------------------------------------------
 // Procedures API (Cuidados & Procedimentos / Tratamentos)
 // ----------------------------------------------------
@@ -532,6 +570,15 @@ function writeLocalProcedures(procedures: any[]) {
   }
 }
 
+function normalizeProcedureImageUrl(url: any): string {
+  if (!url || typeof url !== 'string') return '/uploads/tricoscopia.jpg';
+  let clean = url.trim();
+  if (clean.startsWith('uploads/')) {
+    clean = '/' + clean;
+  }
+  return clean;
+}
+
 async function ensureProceduresTable(pool: any) {
   if (proceduresTableInitialized) return;
   try {
@@ -554,6 +601,13 @@ async function ensureProceduresTable(pool: any) {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // Ensure image_url column is LONGTEXT even if previously created as TEXT
+    try {
+      await pool.query('ALTER TABLE procedures MODIFY COLUMN image_url LONGTEXT');
+    } catch {
+      // Column is already LONGTEXT or not alterable
+    }
+
     const [rows]: any = await pool.query('SELECT COUNT(*) as cnt FROM procedures');
     if (rows[0]?.cnt === 0 && !fs.existsSync(PROCEDURES_FILE)) {
       for (const p of DEFAULT_PROCEDURES) {
@@ -562,7 +616,7 @@ async function ensureProceduresTable(pool: any) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
           p.id, p.title, p.subtitle || '', p.description, p.category, p.duration, p.downtime,
-          JSON.stringify(p.idealFor || []), JSON.stringify(p.benefits || []), p.imageUrl,
+          JSON.stringify(p.idealFor || []), JSON.stringify(p.benefits || []), normalizeProcedureImageUrl(p.imageUrl),
           p.popular ? 1 : 0, JSON.stringify(p.faq || [])
         ]);
       }
@@ -623,10 +677,7 @@ app.post('/api/procedures', async (req, res) => {
   }
 
   const id = proc.id || 'proc-' + Date.now();
-  const processedImage = saveBase64ImageIfPresent(
-    proc.imageUrl || '/uploads/tricoscopia.jpg',
-    'proc'
-  );
+  const processedImage = normalizeProcedureImageUrl(proc.imageUrl);
 
   const newProc = {
     id,
@@ -676,8 +727,9 @@ app.post('/api/procedures', async (req, res) => {
         newProc.popular ? 1 : 0,
         JSON.stringify(newProc.faq)
       ]);
-    } catch (err) {
-      console.warn('Could not insert procedure into MySQL:', err);
+      console.log('[MySQL] Procedure created/synced:', id, 'image_url:', newProc.imageUrl);
+    } catch (err: any) {
+      console.error('Could not insert procedure into MySQL:', err.message);
     }
   }
 
@@ -697,8 +749,8 @@ app.put('/api/procedures/:id', async (req, res) => {
   const { id } = req.params;
   const updates = { ...req.body };
 
-  if (updates.imageUrl) {
-    updates.imageUrl = saveBase64ImageIfPresent(updates.imageUrl, 'proc');
+  if (updates.imageUrl !== undefined && updates.imageUrl !== null && typeof updates.imageUrl === 'string') {
+    updates.imageUrl = normalizeProcedureImageUrl(updates.imageUrl);
   }
 
   const pool = getMySqlPool();
@@ -766,8 +818,9 @@ app.put('/api/procedures/:id', async (req, res) => {
           JSON.stringify(updates.faq || [])
         ]);
       }
-    } catch (err) {
-      console.warn('Could not update procedure in MySQL:', err);
+      console.log('[MySQL] Procedure updated:', id, 'image_url:', updates.imageUrl);
+    } catch (err: any) {
+      console.error('Could not update procedure in MySQL:', err.message);
     }
   }
 

@@ -50,6 +50,9 @@ export const ProceduresSection: React.FC<ProceduresSectionProps> = ({
                   alt={proc.title}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    e.currentTarget.src = '/uploads/tricoscopia.jpg';
+                  }}
                 />
                 <div className="absolute top-3 right-3">
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#f4f3eb]/95 backdrop-blur-xs text-[11px] font-medium text-[#3b3530] border border-[#c9bcad] shadow-xs">
@@ -105,6 +108,9 @@ export const ProceduresSection: React.FC<ProceduresSectionProps> = ({
                 alt={selectedModalProcedure.title}
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
+                onError={(e) => {
+                  e.currentTarget.src = '/uploads/tricoscopia.jpg';
+                }}
               />
               <button
                 onClick={() => setSelectedModalProcedure(null)}

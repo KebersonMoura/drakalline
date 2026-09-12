@@ -66,6 +66,31 @@ app.post('/api/upload', (req, res) => {
   }
 });
 
+function saveBase64ImageIfPresent(dataUrlOrUrl: string, prefix = 'proc'): string {
+  if (!dataUrlOrUrl || typeof dataUrlOrUrl !== 'string' || !dataUrlOrUrl.startsWith('data:')) {
+    return dataUrlOrUrl;
+  }
+  try {
+    const matches = dataUrlOrUrl.match(/^data:([A-Za-z0-9\/\-+.]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) return dataUrlOrUrl;
+
+    const mime = matches[1].toLowerCase();
+    let ext = 'jpg';
+    if (mime.includes('png')) ext = 'png';
+    else if (mime.includes('webp')) ext = 'webp';
+    else if (mime.includes('gif')) ext = 'gif';
+
+    const buffer = Buffer.from(matches[2], 'base64');
+    const safeName = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+    const filePath = path.join(UPLOADS_DIR, safeName);
+    fs.writeFileSync(filePath, buffer);
+    return `/uploads/${safeName}`;
+  } catch (err) {
+    console.warn('Could not extract and save base64 image:', err);
+    return dataUrlOrUrl;
+  }
+}
+
 // ----------------------------------------------------
 // Health Check & Database Status
 // ----------------------------------------------------
@@ -548,6 +573,16 @@ async function ensureProceduresTable(pool: any) {
   }
 }
 
+function safeJsonParse(val: any, fallback: any = []) {
+  if (!val) return fallback;
+  if (typeof val === 'object') return val;
+  try {
+    return JSON.parse(val);
+  } catch {
+    return fallback;
+  }
+}
+
 app.get('/api/procedures', async (req, res) => {
   const pool = getMySqlPool();
   if (!pool) return res.json(readLocalProcedures());
@@ -562,16 +597,16 @@ app.get('/api/procedures', async (req, res) => {
     const mapped = rows.map((r: any) => ({
       id: r.id,
       title: r.title,
-      subtitle: r.subtitle,
+      subtitle: r.subtitle || '',
       description: r.description,
-      category: r.category,
-      duration: r.duration,
-      downtime: r.downtime,
-      idealFor: typeof r.ideal_for === 'string' ? JSON.parse(r.ideal_for) : (r.ideal_for || []),
-      benefits: typeof r.benefits === 'string' ? JSON.parse(r.benefits) : (r.benefits || []),
+      category: r.category || 'capilar',
+      duration: r.duration || '45 minutos',
+      downtime: r.downtime || 'Sem downtime',
+      idealFor: safeJsonParse(r.ideal_for, []),
+      benefits: safeJsonParse(r.benefits, []),
       imageUrl: r.image_url,
       popular: Boolean(r.popular),
-      faq: typeof r.faq === 'string' ? JSON.parse(r.faq) : (r.faq || [])
+      faq: safeJsonParse(r.faq, [])
     }));
     writeLocalProcedures(mapped);
     res.json(mapped);
@@ -588,6 +623,11 @@ app.post('/api/procedures', async (req, res) => {
   }
 
   const id = proc.id || 'proc-' + Date.now();
+  const processedImage = saveBase64ImageIfPresent(
+    proc.imageUrl || '/uploads/tricoscopia.jpg',
+    'proc'
+  );
+
   const newProc = {
     id,
     title: proc.title,
@@ -598,7 +638,7 @@ app.post('/api/procedures', async (req, res) => {
     downtime: proc.downtime || 'Sem downtime',
     idealFor: Array.isArray(proc.idealFor) ? proc.idealFor : [],
     benefits: Array.isArray(proc.benefits) ? proc.benefits : [],
-    imageUrl: proc.imageUrl || 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80',
+    imageUrl: processedImage,
     popular: Boolean(proc.popular),
     faq: Array.isArray(proc.faq) ? proc.faq : []
   };
@@ -623,9 +663,18 @@ app.post('/api/procedures', async (req, res) => {
           popular = VALUES(popular),
           faq = VALUES(faq)
       `, [
-        newProc.id, newProc.title, newProc.subtitle, newProc.description, newProc.category,
-        newProc.duration, newProc.downtime, JSON.stringify(newProc.idealFor), JSON.stringify(newProc.benefits),
-        newProc.imageUrl, newProc.popular ? 1 : 0, JSON.stringify(newProc.faq)
+        newProc.id,
+        newProc.title,
+        newProc.subtitle ?? '',
+        newProc.description,
+        newProc.category ?? 'capilar',
+        newProc.duration ?? '45 minutos',
+        newProc.downtime ?? 'Sem downtime',
+        JSON.stringify(newProc.idealFor),
+        JSON.stringify(newProc.benefits),
+        newProc.imageUrl,
+        newProc.popular ? 1 : 0,
+        JSON.stringify(newProc.faq)
       ]);
     } catch (err) {
       console.warn('Could not insert procedure into MySQL:', err);
@@ -646,13 +695,17 @@ app.post('/api/procedures', async (req, res) => {
 
 app.put('/api/procedures/:id', async (req, res) => {
   const { id } = req.params;
-  const updates = req.body;
+  const updates = { ...req.body };
+
+  if (updates.imageUrl) {
+    updates.imageUrl = saveBase64ImageIfPresent(updates.imageUrl, 'proc');
+  }
 
   const pool = getMySqlPool();
   if (pool) {
     try {
       await ensureProceduresTable(pool);
-      await pool.query(`
+      const [result]: any = await pool.query(`
         UPDATE procedures SET
           title = COALESCE(?, title),
           subtitle = COALESCE(?, subtitle),
@@ -667,19 +720,52 @@ app.put('/api/procedures/:id', async (req, res) => {
           faq = COALESCE(?, faq)
         WHERE id = ?
       `, [
-        updates.title,
-        updates.subtitle,
-        updates.description,
-        updates.category,
-        updates.duration,
-        updates.downtime,
+        updates.title ?? null,
+        updates.subtitle ?? null,
+        updates.description ?? null,
+        updates.category ?? null,
+        updates.duration ?? null,
+        updates.downtime ?? null,
         updates.idealFor ? JSON.stringify(updates.idealFor) : null,
         updates.benefits ? JSON.stringify(updates.benefits) : null,
-        updates.imageUrl,
+        updates.imageUrl ?? null,
         updates.popular !== undefined ? (updates.popular ? 1 : 0) : null,
         updates.faq ? JSON.stringify(updates.faq) : null,
         id
       ]);
+
+      if (result && result.affectedRows === 0) {
+        // If procedure did not exist in MySQL yet, insert it directly
+        await pool.query(`
+          INSERT INTO procedures (id, title, subtitle, description, category, duration, downtime, ideal_for, benefits, image_url, popular, faq)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            subtitle = VALUES(subtitle),
+            description = VALUES(description),
+            category = VALUES(category),
+            duration = VALUES(duration),
+            downtime = VALUES(downtime),
+            ideal_for = VALUES(ideal_for),
+            benefits = VALUES(benefits),
+            image_url = VALUES(image_url),
+            popular = VALUES(popular),
+            faq = VALUES(faq)
+        `, [
+          id,
+          updates.title || 'Tratamento',
+          updates.subtitle ?? '',
+          updates.description || '',
+          updates.category ?? 'capilar',
+          updates.duration ?? '45 minutos',
+          updates.downtime ?? 'Sem downtime',
+          JSON.stringify(updates.idealFor || []),
+          JSON.stringify(updates.benefits || []),
+          updates.imageUrl || '/uploads/tricoscopia.jpg',
+          updates.popular ? 1 : 0,
+          JSON.stringify(updates.faq || [])
+        ]);
+      }
     } catch (err) {
       console.warn('Could not update procedure in MySQL:', err);
     }
@@ -687,13 +773,30 @@ app.put('/api/procedures/:id', async (req, res) => {
 
   const local = readLocalProcedures();
   const index = local.findIndex((p: any) => p.id === id);
+  let savedProcedure: any;
   if (index !== -1) {
     local[index] = { ...local[index], ...updates };
-    writeLocalProcedures(local);
-    return res.json({ status: 'success', procedure: local[index] });
+    savedProcedure = local[index];
+  } else {
+    savedProcedure = {
+      id,
+      title: updates.title || 'Tratamento',
+      subtitle: updates.subtitle || '',
+      description: updates.description || '',
+      category: updates.category || 'capilar',
+      duration: updates.duration || '45 minutos',
+      downtime: updates.downtime || 'Sem downtime',
+      idealFor: updates.idealFor || [],
+      benefits: updates.benefits || [],
+      imageUrl: updates.imageUrl || '/uploads/tricoscopia.jpg',
+      popular: Boolean(updates.popular),
+      faq: updates.faq || []
+    };
+    local.push(savedProcedure);
   }
+  writeLocalProcedures(local);
 
-  res.json({ status: 'success', procedure: updates });
+  res.json({ status: 'success', procedure: savedProcedure });
 });
 
 app.delete('/api/procedures/:id', async (req, res) => {

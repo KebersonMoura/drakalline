@@ -133,6 +133,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [proceduresList, setProceduresList] = useState<Procedure[]>(() => storageService.getProcedures());
   const [showEditProcedureModal, setShowEditProcedureModal] = useState<boolean>(false);
   const [selectedProcedureForEdit, setSelectedProcedureForEdit] = useState<Procedure | null>(null);
+  const [editProcedureInitialTab, setEditProcedureInitialTab] = useState<'text' | 'image'>('text');
   const [procedureToDelete, setProcedureToDelete] = useState<Procedure | null>(null);
   const [isDeletingProcedure, setIsDeletingProcedure] = useState<boolean>(false);
 
@@ -167,6 +168,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       loadAllData();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    const handleProceduresUpdate = (e: any) => {
+      if (Array.isArray(e.detail) && e.detail.length > 0) {
+        setProceduresList(e.detail);
+      }
+    };
+    window.addEventListener('procedures-updated', handleProceduresUpdate as EventListener);
+    return () => {
+      window.removeEventListener('procedures-updated', handleProceduresUpdate as EventListener);
+    };
+  }, []);
 
   const loadAllData = () => {
     setAppointments(storageService.getAppointments());
@@ -474,12 +487,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleSaveProcedureAdmin = async (procData: Procedure) => {
+    let saved: Procedure | null = null;
     const existing = proceduresList.some(p => p.id === procData.id);
     if (existing) {
-      await storageService.updateProcedure(procData.id, procData);
+      saved = await storageService.updateProcedure(procData.id, procData);
     } else {
-      await storageService.addProcedure(procData);
+      saved = await storageService.addProcedure(procData);
     }
+
+    if (saved) {
+      setProceduresList(prev => {
+        const idx = prev.findIndex(p => p.id === saved!.id);
+        if (idx !== -1) {
+          const next = [...prev];
+          next[idx] = saved!;
+          return next;
+        }
+        return [...prev, saved!];
+      });
+    }
+
     loadAllData();
     onDataChanged();
   };
@@ -1701,6 +1728,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             alt={proc.title}
                             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              e.currentTarget.src = '/uploads/tricoscopia.jpg';
+                            }}
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-stone-950/80 via-stone-950/20 to-transparent" />
 
@@ -1729,6 +1759,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               type="button"
                               onClick={() => {
                                 setSelectedProcedureForEdit(proc);
+                                setEditProcedureInitialTab('image');
                                 setShowEditProcedureModal(true);
                               }}
                               className="px-4 py-2 bg-white text-stone-900 text-xs font-bold rounded-xl shadow-lg flex items-center gap-2 hover:bg-amber-50 cursor-pointer transition-all transform group-hover:scale-105"
@@ -1773,6 +1804,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               type="button"
                               onClick={() => {
                                 setSelectedProcedureForEdit(proc);
+                                setEditProcedureInitialTab('text');
                                 setShowEditProcedureModal(true);
                               }}
                               className="flex-1 py-2 px-3 bg-stone-100 hover:bg-[#aa907d] hover:text-white text-stone-800 text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
@@ -2348,6 +2380,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       <EditProcedureModal
         isOpen={showEditProcedureModal}
         procedure={selectedProcedureForEdit}
+        initialTab={editProcedureInitialTab}
         onClose={() => setShowEditProcedureModal(false)}
         onSave={handleSaveProcedureAdmin}
         onDelete={handleDeleteProcedureAdmin}

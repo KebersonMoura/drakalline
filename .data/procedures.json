@@ -1,10 +1,10 @@
 [
   {
     "id": "transplante-capilar",
-    "title": "Transplante Capilar (Técnica FUE)",
-    "subtitle": "Restauração definitiva com aspecto natural e preservação da área doadora",
-    "description": "Cirurgia de restauração capilar minimamente invasiva onde os folículos são extraídos individualmente e implantados respeitando o ângulo, densidade e linha frontal natural do paciente.",
-    "category": "facial",
+    "title": "Transplante Capilar FUE",
+    "subtitle": "Como posso te ajudar???",
+    "description": "Quando o assunto é cabelo, nem sempre a solução está em um único tratamento.\n\nNa minha atuação, a Tricologia, a Dermatologia e o Transplante Capilar se complementam para que cada paciente seja avaliado de forma individualizada, desde a investigação da causa da queda até a definição da melhor estratégia de tratamento.\n\nNa Tricologia, investigo alterações do cabelo e do couro cabeludo.\n\nNa Dermatologia, avalio a saúde da pele e as condições que podem estar relacionadas às alterações capilares.\n\nE, quando existe indicação, o transplante capilar pode fazer parte desse planejamento — sempre considerando características como padrão de perda, área doadora, qualidade dos fios e expectativa de resultado.\n\nMeu trabalho não é indicar um procedimento. É entender o seu caso e definir o caminho mais adequado para você.",
+    "category": "capilar",
     "duration": "Procedimento de 6 a 8 horas",
     "downtime": "Retorno às atividades leves em 3 a 5 dias",
     "idealFor": [
@@ -19,7 +19,7 @@
       "Linha anterior projetada com naturalidade anatômica",
       "Acompanhamento pré e pós-operatório completo"
     ],
-    "imageUrl": "/uploads/img_1788916066009_01caty.jpg",
+    "imageUrl": "/uploads/transplante.jpg",
     "popular": true,
     "faq": [
       {
@@ -34,10 +34,10 @@
   },
   {
     "id": "tricoscopia-digital",
-    "title": "Tricoscopia Digital & Diagnóstico Capilar",
-    "subtitle": "Exame de alta precisão para identificar as reais causas da queda capilar",
-    "description": "Avaliação dermatoscópica computadorizada dos fios e couro cabeludo. Permite analisar densidade folicular, espessura dos fios, sinais inflamatórios e miniaturização, viabilizando um diagnóstico preciso.",
-    "category": "facial",
+    "title": "DIAGNÓSTICO CORRETO",
+    "subtitle": "Mas muitas vezes o que faltou não foi tratamento",
+    "description": "E essa foto me lembra da responsabilidade que existe em cuidar de pessoas.\n\nNa medicina, aprendemos que tratar sintomas sem investigar a causa quase nunca resolve o problema.\n\nCom a saúde capilar feminina, muitas vezes acontece exatamente isso: mulheres passam anos tentando produtos, vitaminas ou receitas da internet antes de entender o que realmente está acontecendo.\n\nQueda de cabelo não é apenas estética.\nPode envolver fatores hormonais, genéticos, inflamatórios e metabólicos.\n\nCuidar disso também é cuidar da saúde.\n\nHoje é um bom dia para lembrar que informação correta também é uma forma de cuidado.",
+    "category": "capilar",
     "duration": "60 minutos",
     "downtime": "Sem downtime (exame não invasivo)",
     "idealFor": [
@@ -52,7 +52,7 @@
       "Identificação da causa raiz da queda capilar",
       "Direcionamento de tratamento personalizado"
     ],
-    "imageUrl": "/uploads/img_1788916017343_h9k7ld.jpg",
+    "imageUrl": "/uploads/tricoscopia.jpg",
     "popular": true,
     "faq": [
       {
@@ -67,10 +67,10 @@
   },
   {
     "id": "mmp-capilar",
-    "title": "MMP® Capilar & Microinfusão de Medicamentos",
-    "subtitle": "Aplicação direta de ativos estéreis na raiz do folículo piloso",
-    "description": "Técnica médica que utiliza microagulhamento controlado para infundir fatores de crescimento, vitaminas e medicações específicas diretamente na derme onde se localizam as raízes dos fios.",
-    "category": "rejuvenescimento",
+    "title": "MOUNJARO PODE CAUSAR QUEDA DE CABELO?",
+    "subtitle": "Você começou a perceber mais fios no banho?",
+    "description": "Você começou a perceber mais fios no banho, na escova ou no travesseiro depois de iniciar o processo de emagrecimento?\n\nE, naturalmente, a primeira pergunta é: foi o Mounjaro?\n\nA resposta nem sempre é tão simples.\n\nA queda de cabelo pode estar relacionada a diferentes mudanças que acontecem no organismo durante uma perda de peso importante, como redução rápida do peso, alterações na alimentação e possíveis deficiências nutricionais.\n\nMas cada cabelo conta uma história diferente.\n\nPor isso, antes de culpar o medicamento, interromper o tratamento ou começar suplementos por conta própria, é importante investigar o que realmente está acontecendo.\n\nQueda de cabelo não é um diagnóstico.\n\nÉ um sinal.\n\nE entender a causa é sempre o primeiro passo para cuidar dela da forma certa.",
+    "category": "capilar",
     "duration": "45 minutos",
     "downtime": "Sem repouso (lavagem liberada em 24h)",
     "idealFor": [
@@ -85,7 +85,7 @@
       "Espessamento do calibre da haste capilar",
       "Procedimento realizado com anestesia local confortável"
     ],
-    "imageUrl": "/uploads/img_1788916131091_53i2pc.jpg",
+    "imageUrl": "/uploads/mmp.jpg",
     "popular": true,
     "faq": [
       {
@@ -95,31 +95,26 @@
     ]
   },
   {
-    "id": "terapia-laser",
-    "title": "Fotobioestimulação & Lasers Capilares",
-    "subtitle": "Energia luminosa para ativar a circulação e metabolismo folicular",
-    "description": "Uso de luzes e lasers de baixa intensidade (LLLT) para aumentar a oxigenação celular no couro cabeludo, reduzir a inflamação folicular e acelerar a transição dos fios para a fase de crescimento.",
-    "category": "rejuvenescimento",
-    "duration": "30 minutos",
-    "downtime": "Zero (indolor e relaxante)",
+    "id": "proc-1788995097506",
+    "title": "TRANSPLANTE CAPILAR",
+    "subtitle": "O Guia Completo para Recuperar seu Cabelo",
+    "description": "A perda de cabelo é uma condição que afeta milhões de pessoas em todo o mundo, impactando não apenas a aparência, mas também a autoconfiança e a autoestima. Felizmente, os avanços na medicina estética tornaram o transplante capilar uma solução altamente eficaz e segura para restaurar o cabelo de forma natural e permanente.",
+    "category": "capilar",
+    "duration": "45 a 60 minutos",
+    "downtime": "Sem downtime",
     "idealFor": [
-      "Queda pós-estresse ou pós-parto",
-      "Dermatite seborreica do couro cabeludo",
-      "Recuperação pós-cirúrgica capilar",
-      "Potencialização de tratamentos clínicos"
+      "Queda capilar ou afinamento dos fios"
     ],
     "benefits": [
-      "Estímulo da microcirculação local",
-      "Ação anti-inflamatória no couro cabeludo",
-      "Melhora a nutrição e brilho dos fios",
-      "Indolor e sem agulhas"
+      "Atendimento médico especializado",
+      "Avaliação e diagnóstico individualizado"
     ],
-    "imageUrl": "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&w=800&q=80",
+    "imageUrl": "/uploads/clinica.jpg",
     "popular": false,
     "faq": [
       {
-        "answer": "Sim, é altamente sinérgico quando combinado com MMP® e terapia medicamentosa oral/tópica.",
-        "question": "Pode ser associado a outros tratamentos?"
+        "answer": "O tratamento é realizado no consultório médico com todo conforto, anestesia tópica quando necessária e acompanhamento minucioso.",
+        "question": "Como é realizado o procedimento?"
       }
     ]
   }

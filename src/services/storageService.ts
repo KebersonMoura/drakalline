@@ -837,15 +837,10 @@ class StorageService {
     try {
       localStorage.setItem(STORAGE_KEYS.PROCEDURES, JSON.stringify(procedures));
     } catch (e) {
-      console.warn('LocalStorage quota limit reached when saving procedures:', e);
+      console.warn('LocalStorage quota warning when saving procedures:', e);
       try {
-        const lightweight = procedures.map(p => ({
-          ...p,
-          imageUrl: (p.imageUrl?.startsWith('data:') && p.imageUrl.length > 1000)
-            ? 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80'
-            : p.imageUrl
-        }));
-        localStorage.setItem(STORAGE_KEYS.PROCEDURES, JSON.stringify(lightweight));
+        localStorage.removeItem('dra_kaline_notifications_v2');
+        localStorage.setItem(STORAGE_KEYS.PROCEDURES, JSON.stringify(procedures));
       } catch (inner) {
         // Safe silence: in-memory state holds full procedures
       }
@@ -876,22 +871,48 @@ class StorageService {
   async updateProcedure(id: string, updates: Partial<Procedure>): Promise<Procedure | null> {
     const list = [...this.getProcedures()];
     const index = list.findIndex(p => p.id === id);
-    if (index === -1) return null;
 
-    const updatedProc: Procedure = {
-      ...list[index],
-      ...updates
-    };
-    list[index] = updatedProc;
+    let updatedProc: Procedure;
+    if (index !== -1) {
+      updatedProc = {
+        ...list[index],
+        ...updates
+      };
+      list[index] = updatedProc;
+    } else {
+      updatedProc = {
+        id,
+        title: updates.title || 'Tratamento',
+        subtitle: updates.subtitle || '',
+        description: updates.description || '',
+        category: updates.category || 'capilar',
+        duration: updates.duration || '45 minutos',
+        downtime: updates.downtime || 'Sem downtime',
+        idealFor: updates.idealFor || [],
+        benefits: updates.benefits || [],
+        imageUrl: updates.imageUrl || '/uploads/tricoscopia.jpg',
+        popular: Boolean(updates.popular),
+        faq: updates.faq || []
+      };
+      list.push(updatedProc);
+    }
     this.saveProcedures(list);
 
     // Sync to MySQL backend
     try {
-      await fetch(`/api/procedures/${id}`, {
+      const res = await fetch(`/api/procedures/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.procedure?.imageUrl && data.procedure.imageUrl !== updatedProc.imageUrl) {
+          updatedProc.imageUrl = data.procedure.imageUrl;
+          const freshList = this.getProcedures().map(p => p.id === id ? { ...p, ...data.procedure } : p);
+          this.saveProcedures(freshList);
+        }
+      }
     } catch (e) {
       console.warn('Could not sync procedure update to backend:', e);
     }
@@ -899,23 +920,31 @@ class StorageService {
     return updatedProc;
   }
 
-  async addProcedure(procData: Omit<Procedure, 'id'>): Promise<Procedure> {
+  async addProcedure(procData: Omit<Procedure, 'id'> | Procedure): Promise<Procedure> {
     const list = [...this.getProcedures()];
-    const newId = 'proc-' + Date.now();
-    const newProc: Procedure = {
+    const id = (procData as any).id || 'proc-' + Date.now();
+    let newProc: Procedure = {
       ...procData,
-      id: newId
+      id
     };
     list.push(newProc);
     this.saveProcedures(list);
 
     // Sync to MySQL backend
     try {
-      await fetch('/api/procedures', {
+      const res = await fetch('/api/procedures', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProc)
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.procedure) {
+          newProc = data.procedure;
+          const freshList = this.getProcedures().map(p => p.id === id ? data.procedure : p);
+          this.saveProcedures(freshList);
+        }
+      }
     } catch (e) {
       console.warn('Could not sync new procedure to backend:', e);
     }

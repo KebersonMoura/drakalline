@@ -1,7 +1,9 @@
 export type ProcedureCategory = 
+  | 'capilar'
   | 'facial'
   | 'rejuvenescimento'
   | 'corporal_pescoco'
+  | 'corporal'
   | 'cuidados_pele';
 
 export interface Procedure {

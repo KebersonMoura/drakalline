@@ -10,7 +10,8 @@ import {
   Trash2, 
   Plus, 
   AlertCircle,
-  HelpCircle
+  HelpCircle,
+  Camera
 } from 'lucide-react';
 import { Procedure } from '../types';
 
@@ -20,6 +21,7 @@ interface EditProcedureModalProps {
   procedure: Procedure | null; // null means creating a new procedure
   onSave: (procedure: Procedure) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  initialTab?: 'text' | 'image';
 }
 
 async function compressImageFile(file: File, maxWidth = 1600, maxHeight = 1000, quality = 0.85): Promise<string> {
@@ -62,34 +64,34 @@ async function compressImageFile(file: File, maxWidth = 1600, maxHeight = 1000, 
 
 const PRESET_PROCEDURE_IMAGES = [
   {
-    name: 'Tricoscopia & Diagnóstico',
-    url: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=1200&q=80',
+    name: 'Tricoscopia Digital',
+    url: '/uploads/tricoscopia.jpg',
     category: 'Diagnóstico'
   },
   {
     name: 'Transplante Capilar FUE',
-    url: 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&w=1200&q=80',
+    url: '/uploads/transplante.jpg',
     category: 'Cirúrgico'
   },
   {
-    name: 'MMP® & Microinfusão',
-    url: 'https://images.unsplash.com/photo-1512290900672-1f41b2a926a5?auto=format&fit=crop&w=1200&q=80',
+    name: 'MMP® Capilar & Microinfusão',
+    url: '/uploads/mmp.jpg',
     category: 'Regeneração'
   },
   {
+    name: 'Consultório & Atendimento',
+    url: '/uploads/clinica.jpg',
+    category: 'Ambiente'
+  },
+  {
     name: 'Laser & Fototerapia',
-    url: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=1200&q=80',
+    url: '/uploads/laser.jpg',
     category: 'Laser'
   },
   {
     name: 'Dermatologia & Pele',
-    url: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=1200&q=80',
+    url: '/uploads/dermatologia.jpg',
     category: 'Clínica'
-  },
-  {
-    name: 'Consultório & Atendimento',
-    url: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=1200&q=80',
-    category: 'Ambiente'
   },
   {
     name: 'Cuidado Capilar Feminino',
@@ -97,7 +99,7 @@ const PRESET_PROCEDURE_IMAGES = [
     category: 'Capilar'
   },
   {
-    name: 'Microscopia & Análise Folicular',
+    name: 'Microscopia Folicular',
     url: 'https://images.unsplash.com/photo-1532938911079-1b06ac7ceec7?auto=format&fit=crop&w=1200&q=80',
     category: 'Laboratório'
   }
@@ -108,7 +110,8 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
   onClose,
   procedure,
   onSave,
-  onDelete
+  onDelete,
+  initialTab = 'text'
 }) => {
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
@@ -163,8 +166,8 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
       setIdealFor(['Queda capilar ou afinamento dos fios']);
     }
     setErrorMsg('');
-    setActiveTab('text');
-  }, [procedure, isOpen]);
+    setActiveTab(initialTab || 'text');
+  }, [procedure, isOpen, initialTab]);
 
   if (!isOpen) return null;
 
@@ -358,7 +361,42 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
           {/* TAB 1: TEXTS & DETAILS */}
           {activeTab === 'text' && (
             <div className="space-y-5">
-              
+              {/* Current Image Quick Preview & Change Action */}
+              <div className="p-3 bg-white rounded-2xl border border-stone-200 flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-14 h-10 rounded-xl overflow-hidden bg-stone-900 shrink-0 border border-stone-200">
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt={title || 'Foto'}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => { e.currentTarget.src = '/uploads/tricoscopia.jpg'; }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-stone-400">
+                        <ImageIcon className="w-4 h-4" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-xs font-bold text-stone-900 block">Foto do Tratamento</span>
+                    <span className="text-[11px] text-stone-500 truncate block">
+                      {imageUrl ? (imageUrl.startsWith('/uploads') ? 'Foto salva no servidor' : 'Foto personalizada vinculada') : 'Nenhuma foto selecionada'}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('image')}
+                  className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold rounded-xl border border-amber-200 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  <Camera className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Trocar / Alterar Foto</span>
+                </button>
+              </div>
+
               {/* Title & Category */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="sm:col-span-2 space-y-1.5">
@@ -590,6 +628,9 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
                       alt={title || 'Prévia do procedimento'}
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.src = '/uploads/tricoscopia.jpg';
+                      }}
                     />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-stone-400 gap-2">
@@ -697,15 +738,17 @@ export const EditProcedureModal: React.FC<EditProcedureModalProps> = ({
                     id="proc-image-upload"
                   />
 
-                  <label
-                    htmlFor="proc-image-upload"
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
                     className={`cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold rounded-xl shadow-xs transition-all ${
                       isUploading ? 'opacity-60 cursor-not-allowed' : ''
                     }`}
                   >
                     <Upload className="w-4 h-4" />
                     <span>{isUploading ? 'Processando e Enviando Foto...' : 'Escolher Arquivo do Computador'}</span>
-                  </label>
+                  </button>
                 </div>
               )}
 

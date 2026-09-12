@@ -43,6 +43,8 @@ export default function App() {
     storageService.fetchLiveWhatsapp().catch(() => {});
     storageService.fetchLiveClinicLogo().catch(() => {});
     storageService.fetchLiveClinicAddress().catch(() => {});
+    storageService.fetchLiveAppointments().catch(() => {});
+    storageService.fetchLiveClients().catch(() => {});
 
     const handleProceduresUpdated = (e: any) => {
       if (e && e.detail && Array.isArray(e.detail)) {

@@ -87,7 +87,7 @@ export const QuickBookingModal: React.FC<QuickBookingModalProps> = ({
       await notificationService.requestPermission();
     }
 
-    const newAppointment = storageService.addAppointment({
+    const newAppointment = await storageService.addAppointmentLive({
       clientName,
       clientPhone,
       clientEmail: clientEmail || `${clientName.toLowerCase().replace(/\s+/g, '')}@exemplo.com`,

@@ -19,6 +19,74 @@ if (!fs.existsSync(UPLOADS_DIR)) {
     console.warn('Could not create uploads directory', err);
   }
 }
+let uploadedImagesTableEnsured = false;
+async function ensureUploadedImagesTable(pool: any) {
+  if (uploadedImagesTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uploaded_images (
+        id VARCHAR(120) PRIMARY KEY,
+        filename VARCHAR(255),
+        mime_type VARCHAR(50),
+        data_url LONGTEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    uploadedImagesTableEnsured = true;
+  } catch (err: any) {
+    console.warn('Could not ensure uploaded_images table:', err.message);
+  }
+}
+
+// ----------------------------------------------------
+// File & Image Upload API (Saves to disk & MySQL uploaded_images)
+// ----------------------------------------------------
+// Dedicated uploads handler: checks disk -> checks MySQL -> falls back to default image (never returns HTML 404)
+app.get(['/uploads/:filename', '/uploads'], async (req, res, next) => {
+  const filename = req.params.filename || (req.url.replace(/^\//, '').split('?')[0]);
+  if (!filename || filename === 'uploads') return next();
+
+  const filePath = path.join(UPLOADS_DIR, filename);
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  }
+
+  // Check MySQL uploaded_images table
+  const pool = getMySqlPool();
+  if (pool) {
+    try {
+      await ensureUploadedImagesTable(pool);
+      const [rows]: any = await pool.query('SELECT mime_type, data_url FROM uploaded_images WHERE id = ?', [filename]);
+      if (rows && rows.length > 0 && rows[0].data_url) {
+        const matches = rows[0].data_url.match(/^data:([A-Za-z0-9\/\-+.]+);base64,(.+)$/);
+        if (matches && matches[2]) {
+          const buffer = Buffer.from(matches[2], 'base64');
+          try {
+            fs.writeFileSync(filePath, buffer);
+          } catch (_) {}
+          res.setHeader('Content-Type', rows[0].mime_type || 'image/jpeg');
+          return res.send(buffer);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Could not fetch image from MySQL:', err.message);
+    }
+  }
+
+  // Fallback: If image not found, send default procedure image (transplante.jpg or tricoscopia.jpg)
+  const defaultFallback = path.join(UPLOADS_DIR, 'transplante.jpg');
+  if (fs.existsSync(defaultFallback)) {
+    return res.sendFile(defaultFallback);
+  }
+
+  const tricoscopiaFallback = path.join(UPLOADS_DIR, 'tricoscopia.jpg');
+  if (fs.existsSync(tricoscopiaFallback)) {
+    return res.sendFile(tricoscopiaFallback);
+  }
+
+  res.status(404).send('Image not found');
+});
+
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // In-memory / file-based storage with initial state as fallback
@@ -31,10 +99,7 @@ if (!fs.existsSync(DATA_DIR)) {
   }
 }
 
-// ----------------------------------------------------
-// File & Image Upload API (Saves to disk & serves via /uploads)
-// ----------------------------------------------------
-app.post('/api/upload', (req, res) => {
+app.post('/api/upload', async (req, res) => {
   const { dataUrl, filename } = req.body;
   if (!dataUrl) {
     return res.status(400).json({ error: 'Nenhuma imagem enviada.' });
@@ -59,6 +124,22 @@ app.post('/api/upload', (req, res) => {
     fs.writeFileSync(filePath, buffer);
     const publicUrl = `/uploads/${safeName}`;
 
+    // Store in MySQL uploaded_images for permanent persistence across container restarts
+    const pool = getMySqlPool();
+    if (pool) {
+      try {
+        await ensureUploadedImagesTable(pool);
+        await pool.query(`
+          INSERT INTO uploaded_images (id, filename, mime_type, data_url)
+          VALUES (?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE data_url = VALUES(data_url), mime_type = VALUES(mime_type)
+        `, [safeName, filename || safeName, mime, dataUrl]);
+        console.log('[MySQL] Uploaded image persisted to uploaded_images table:', safeName);
+      } catch (dbErr: any) {
+        console.warn('Could not persist image to MySQL:', dbErr.message);
+      }
+    }
+
     res.json({ status: 'success', url: publicUrl });
   } catch (err: any) {
     console.error('Error saving uploaded file:', err);
@@ -66,7 +147,7 @@ app.post('/api/upload', (req, res) => {
   }
 });
 
-function saveBase64ImageIfPresent(dataUrlOrUrl: string, prefix = 'proc'): string {
+async function saveBase64ImageIfPresentAsync(dataUrlOrUrl: string, prefix = 'proc'): Promise<string> {
   if (!dataUrlOrUrl || typeof dataUrlOrUrl !== 'string' || !dataUrlOrUrl.startsWith('data:')) {
     return dataUrlOrUrl;
   }
@@ -84,6 +165,19 @@ function saveBase64ImageIfPresent(dataUrlOrUrl: string, prefix = 'proc'): string
     const safeName = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
     const filePath = path.join(UPLOADS_DIR, safeName);
     fs.writeFileSync(filePath, buffer);
+
+    const pool = getMySqlPool();
+    if (pool) {
+      try {
+        await ensureUploadedImagesTable(pool);
+        await pool.query(`
+          INSERT INTO uploaded_images (id, filename, mime_type, data_url)
+          VALUES (?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE data_url = VALUES(data_url), mime_type = VALUES(mime_type)
+        `, [safeName, safeName, mime, dataUrlOrUrl]);
+      } catch (_) {}
+    }
+
     return `/uploads/${safeName}`;
   } catch (err) {
     console.warn('Could not extract and save base64 image:', err);
@@ -161,54 +255,260 @@ app.post('/api/database/migrate', async (req, res) => {
 });
 
 // ----------------------------------------------------
+// Appointments & Client Prontuário API (Full MySQL Persistence)
+// ----------------------------------------------------
+const APPOINTMENTS_FILE = path.join(DATA_DIR, 'appointments.json');
+const CLIENTS_FILE = path.join(DATA_DIR, 'clients.json');
+
+function readLocalAppointments(): any[] {
+  try {
+    if (fs.existsSync(APPOINTMENTS_FILE)) {
+      return JSON.parse(fs.readFileSync(APPOINTMENTS_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn('Error reading local appointments file', e);
+  }
+  return [];
+}
+
+function writeLocalAppointments(data: any[]): void {
+  try {
+    fs.writeFileSync(APPOINTMENTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Error writing local appointments file', e);
+  }
+}
+
+function readLocalClients(): any[] {
+  try {
+    if (fs.existsSync(CLIENTS_FILE)) {
+      return JSON.parse(fs.readFileSync(CLIENTS_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn('Error reading local clients file', e);
+  }
+  return [];
+}
+
+function writeLocalClients(data: any[]): void {
+  try {
+    fs.writeFileSync(CLIENTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Error writing local clients file', e);
+  }
+}
+
+let appointmentsTableEnsured = false;
+async function ensureAppointmentsTable(pool: any) {
+  if (appointmentsTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS appointments (
+        id VARCHAR(64) PRIMARY KEY,
+        client_name VARCHAR(255) NOT NULL,
+        client_phone VARCHAR(50) NOT NULL,
+        client_email VARCHAR(255),
+        procedure_id VARCHAR(100),
+        procedure_title VARCHAR(255),
+        appointment_date VARCHAR(30) NOT NULL,
+        appointment_time VARCHAR(20) NOT NULL,
+        notes TEXT,
+        status ENUM('pendente','confirmado','realizado','cancelado') DEFAULT 'pendente',
+        reminder_sent TINYINT(1) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_apt_date (appointment_date),
+        INDEX idx_apt_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    appointmentsTableEnsured = true;
+  } catch (err: any) {
+    console.warn('Could not ensure appointments table:', err.message);
+  }
+}
+
+let clientsTableEnsured = false;
+async function ensureClientsTable(pool: any) {
+  if (clientsTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS clients (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        phone VARCHAR(50) NOT NULL,
+        email VARCHAR(255),
+        birth_date VARCHAR(30),
+        cpf VARCHAR(20),
+        first_visit_date VARCHAR(50),
+        total_visits INT DEFAULT 1,
+        allergies TEXT,
+        contraindications TEXT,
+        aesthetic_goals TEXT,
+        medical_notes TEXT,
+        before_after_photos JSON,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_cli_phone (phone),
+        INDEX idx_cli_email (email)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS client_procedure_history (
+        id VARCHAR(64) PRIMARY KEY,
+        client_id VARCHAR(64) NOT NULL,
+        procedure_date VARCHAR(50) NOT NULL,
+        procedure_name VARCHAR(255) NOT NULL,
+        product_used VARCHAR(255),
+        lot_number VARCHAR(100),
+        notes TEXT,
+        return_date VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_hist_client (client_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // Auto-link existing appointments into clients table if not already present
+    try {
+      const [apts]: any = await pool.query('SELECT DISTINCT client_name, client_phone, client_email, appointment_date, procedure_title, notes FROM appointments');
+      for (const apt of apts) {
+        if (!apt.client_phone && !apt.client_name) continue;
+        const [existing]: any = await pool.query(
+          'SELECT id FROM clients WHERE phone = ? OR (name = ? AND name != "") LIMIT 1',
+          [apt.client_phone, apt.client_name]
+        );
+        if (!existing || existing.length === 0) {
+          const cliId = 'cli-auto-' + Math.random().toString(36).substring(2, 9);
+          await pool.query(
+            `INSERT INTO clients (id, name, phone, email, first_visit_date, total_visits, aesthetic_goals, allergies, medical_notes)
+             VALUES (?, ?, ?, ?, ?, 1, ?, 'Nenhuma informada', 'Nenhuma informada')`,
+            [
+              cliId,
+              apt.client_name,
+              apt.client_phone,
+              apt.client_email || '',
+              apt.appointment_date || new Date().toISOString().split('T')[0],
+              `Interesse em ${apt.procedure_title || 'Procedimento Capilar'}. Obs: ${apt.notes || 'Nenhuma'}`
+            ]
+          );
+        }
+      }
+    } catch (linkErr) {
+      // Non-fatal
+    }
+
+    clientsTableEnsured = true;
+  } catch (err: any) {
+    console.warn('Could not ensure clients/history tables:', err.message);
+  }
+}
+
+let notifTableEnsured = false;
+async function ensureNotificationsTable(pool: any) {
+  if (notifTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id VARCHAR(64) PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        timestamp VARCHAR(50),
+        is_read TINYINT(1) DEFAULT 0,
+        type VARCHAR(50),
+        appointment_id VARCHAR(64),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_notif_read (is_read)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    notifTableEnsured = true;
+  } catch (err: any) {
+    console.warn('Could not ensure notifications table:', err.message);
+  }
+}
+
+// ----------------------------------------------------
 // Appointments API (Agendamentos no MySQL)
 // ----------------------------------------------------
 app.get('/api/appointments', async (req, res) => {
   const pool = getMySqlPool();
   if (!pool) {
-    return res.json([]);
+    return res.json(readLocalAppointments());
   }
 
   try {
+    await ensureAppointmentsTable(pool);
     const [rows]: any = await pool.query(
-      'SELECT * FROM appointments ORDER BY appointment_date ASC, appointment_time ASC'
+      'SELECT * FROM appointments ORDER BY appointment_date DESC, appointment_time DESC'
     );
     const mapped = rows.map((r: any) => ({
       id: r.id,
       clientName: r.client_name,
       clientPhone: r.client_phone,
-      clientEmail: r.client_email,
-      procedureId: r.procedure_id,
-      procedureTitle: r.procedure_title,
+      clientEmail: r.client_email || '',
+      procedureId: r.procedure_id || '',
+      procedureTitle: r.procedure_title || 'Consulta Médica Capilar',
       date: r.appointment_date,
       time: r.appointment_time,
-      notes: r.notes,
+      notes: r.notes || '',
       status: r.status,
       reminderSent: Boolean(r.reminder_sent),
       createdAt: r.created_at
     }));
+
+    writeLocalAppointments(mapped);
     res.json(mapped);
   } catch (err: any) {
-    console.error('Error fetching appointments:', err);
+    console.error('Error fetching appointments from MySQL:', err);
+    const local = readLocalAppointments();
+    if (local.length > 0) return res.json(local);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/api/appointments', async (req, res) => {
-  const { clientName, clientPhone, clientEmail, procedureId, procedureTitle, date, time, notes } = req.body;
+  const { id, clientName, clientPhone, clientEmail, procedureId, procedureTitle, date, time, notes, status } = req.body;
   if (!clientName || !clientPhone || !date || !time) {
-    return res.status(400).json({ error: 'Campos obrigatórios ausentes.' });
+    return res.status(400).json({ error: 'Campos obrigatórios ausentes (nome, telefone, data e horário).' });
   }
 
   const pool = getMySqlPool();
-  const newId = 'app-' + Date.now();
+  const appointmentId = id || ('app-' + Date.now());
+  const aptStatus = status || 'pendente';
+
+  const appointmentObj = {
+    id: appointmentId,
+    clientName,
+    clientPhone,
+    clientEmail: clientEmail || '',
+    procedureId: procedureId || '',
+    procedureTitle: procedureTitle || 'Consulta Médica Capilar',
+    date,
+    time,
+    notes: notes || '',
+    status: aptStatus,
+    reminderSent: false,
+    createdAt: new Date().toISOString()
+  };
 
   if (pool) {
     try {
+      await ensureAppointmentsTable(pool);
+      await ensureNotificationsTable(pool);
+      await ensureClientsTable(pool);
+
       await pool.query(
         `INSERT INTO appointments (id, client_name, client_phone, client_email, procedure_id, procedure_title, appointment_date, appointment_time, notes, status, reminder_sent)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', false)`,
-        [newId, clientName, clientPhone, clientEmail || '', procedureId || '', procedureTitle || 'Consulta Médica Capilar', date, time, notes || '']
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false)
+         ON DUPLICATE KEY UPDATE
+           client_name = VALUES(client_name),
+           client_phone = VALUES(client_phone),
+           client_email = VALUES(client_email),
+           procedure_id = VALUES(procedure_id),
+           procedure_title = VALUES(procedure_title),
+           appointment_date = VALUES(appointment_date),
+           appointment_time = VALUES(appointment_time),
+           notes = VALUES(notes),
+           status = VALUES(status)`,
+        [appointmentId, clientName, clientPhone, clientEmail || '', procedureId || '', procedureTitle || 'Consulta Médica Capilar', date, time, notes || '', aptStatus]
       );
 
       // Create notification
@@ -221,30 +521,57 @@ app.post('/api/appointments', async (req, res) => {
           'Novo Agendamento Recebido',
           `${clientName} agendou para ${date} às ${time} (${procedureTitle || 'Consulta Capilar'}).`,
           new Date().toISOString(),
-          newId
+          appointmentId
         ]
       );
+
+      // Auto-register or link client in clients table in MySQL
+      try {
+        const [existingClients]: any = await pool.query(
+          'SELECT id, total_visits FROM clients WHERE phone = ? OR (name = ? AND name != "") LIMIT 1',
+          [clientPhone, clientName]
+        );
+        if (existingClients && existingClients.length > 0) {
+          await pool.query(
+            'UPDATE clients SET total_visits = total_visits + 1 WHERE id = ?',
+            [existingClients[0].id]
+          );
+        } else {
+          const cliId = 'cli-' + Date.now();
+          await pool.query(
+            `INSERT INTO clients (id, name, phone, email, first_visit_date, total_visits, aesthetic_goals, allergies, medical_notes)
+             VALUES (?, ?, ?, ?, ?, 1, ?, 'Nenhuma informada', 'Nenhuma informada')`,
+            [
+              cliId,
+              clientName,
+              clientPhone,
+              clientEmail || '',
+              date,
+              `Interesse em ${procedureTitle || 'Consulta Capilar'}. Obs: ${notes || 'Nenhuma'}`
+            ]
+          );
+        }
+      } catch (cliErr) {
+        console.warn('Error auto-syncing client record for appointment:', cliErr);
+      }
     } catch (err: any) {
-      console.error('Error creating appointment in MySQL:', err);
+      console.error('Error inserting appointment into MySQL:', err);
     }
   }
 
+  // Update local file cache
+  const currentLocal = readLocalAppointments();
+  const existingIdx = currentLocal.findIndex(a => a.id === appointmentId);
+  if (existingIdx >= 0) {
+    currentLocal[existingIdx] = appointmentObj;
+  } else {
+    currentLocal.unshift(appointmentObj);
+  }
+  writeLocalAppointments(currentLocal);
+
   res.json({
     status: 'success',
-    appointment: {
-      id: newId,
-      clientName,
-      clientPhone,
-      clientEmail,
-      procedureId,
-      procedureTitle,
-      date,
-      time,
-      notes,
-      status: 'pendente',
-      reminderSent: false,
-      createdAt: new Date().toISOString()
-    }
+    appointment: appointmentObj
   });
 });
 
@@ -255,14 +582,67 @@ app.patch('/api/appointments/:id/status', async (req, res) => {
 
   if (pool) {
     try {
+      await ensureAppointmentsTable(pool);
       await pool.query('UPDATE appointments SET status = ? WHERE id = ?', [status, id]);
-      return res.json({ status: 'success', message: 'Status atualizado no MySQL' });
     } catch (err: any) {
+      console.error('Error updating appointment status in MySQL:', err);
       return res.status(500).json({ error: err.message });
     }
   }
 
-  res.json({ status: 'success' });
+  const currentLocal = readLocalAppointments();
+  const item = currentLocal.find(a => a.id === id);
+  if (item) {
+    item.status = status;
+    writeLocalAppointments(currentLocal);
+  }
+
+  res.json({ status: 'success', message: 'Status atualizado com sucesso no MySQL' });
+});
+
+app.patch('/api/appointments/:id/reminder', async (req, res) => {
+  const { id } = req.params;
+  const pool = getMySqlPool();
+
+  if (pool) {
+    try {
+      await ensureAppointmentsTable(pool);
+      await pool.query('UPDATE appointments SET reminder_sent = 1 WHERE id = ?', [id]);
+    } catch (err: any) {
+      console.error('Error updating appointment reminder in MySQL:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const currentLocal = readLocalAppointments();
+  const item = currentLocal.find(a => a.id === id);
+  if (item) {
+    item.reminderSent = true;
+    writeLocalAppointments(currentLocal);
+  }
+
+  res.json({ status: 'success', message: 'Lembrete marcado como enviado' });
+});
+
+app.delete('/api/appointments/:id', async (req, res) => {
+  const { id } = req.params;
+  const pool = getMySqlPool();
+
+  if (pool) {
+    try {
+      await ensureAppointmentsTable(pool);
+      await pool.query('DELETE FROM appointments WHERE id = ?', [id]);
+      await pool.query('DELETE FROM notifications WHERE appointment_id = ?', [id]);
+    } catch (err: any) {
+      console.error('Error deleting appointment in MySQL:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const currentLocal = readLocalAppointments().filter(a => a.id !== id);
+  writeLocalAppointments(currentLocal);
+
+  res.json({ status: 'success', message: 'Agendamento removido com sucesso' });
 });
 
 // ----------------------------------------------------
@@ -270,9 +650,10 @@ app.patch('/api/appointments/:id/status', async (req, res) => {
 // ----------------------------------------------------
 app.get('/api/clients', async (req, res) => {
   const pool = getMySqlPool();
-  if (!pool) return res.json([]);
+  if (!pool) return res.json(readLocalClients());
 
   try {
+    await ensureClientsTable(pool);
     const [clients]: any = await pool.query('SELECT * FROM clients ORDER BY created_at DESC');
     const [histories]: any = await pool.query('SELECT * FROM client_procedure_history ORDER BY procedure_date DESC');
 
@@ -283,10 +664,10 @@ app.get('/api/clients', async (req, res) => {
           id: h.id,
           date: h.procedure_date,
           procedure: h.procedure_name,
-          productUsed: h.product_used,
-          lotNumber: h.lot_number,
-          notes: h.notes,
-          returnDate: h.return_date
+          productUsed: h.product_used || '',
+          lotNumber: h.lot_number || '',
+          notes: h.notes || '',
+          returnDate: h.return_date || ''
         }));
 
       let photos: string[] = [];
@@ -300,130 +681,238 @@ app.get('/api/clients', async (req, res) => {
         id: c.id,
         name: c.name,
         phone: c.phone,
-        email: c.email,
-        birthDate: c.birth_date,
-        cpf: c.cpf,
-        firstVisitDate: c.first_visit_date,
-        totalVisits: c.total_visits,
-        allergies: c.allergies,
-        contraindications: c.contraindications,
-        aestheticGoals: c.aesthetic_goals,
-        medicalNotes: c.medical_notes,
+        email: c.email || '',
+        birthDate: c.birth_date || '',
+        cpf: c.cpf || '',
+        firstVisitDate: c.first_visit_date || '',
+        totalVisits: Number(c.total_visits) || (clientHistories.length || 1),
+        allergies: c.allergies || 'Nenhuma informada',
+        contraindications: c.contraindications || '',
+        aestheticGoals: c.aesthetic_goals || '',
+        medicalNotes: c.medical_notes || 'Nenhuma informada',
         history: clientHistories,
         beforeAfterPhotos: photos,
         createdAt: c.created_at
       };
     });
 
+    writeLocalClients(result);
     res.json(result);
   } catch (err: any) {
+    console.error('Error fetching clients from MySQL:', err);
+    const local = readLocalClients();
+    if (local.length > 0) return res.json(local);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/api/clients', async (req, res) => {
   const pool = getMySqlPool();
-  if (!pool) return res.status(500).json({ error: 'MySQL offline' });
-
-  const { name, phone, email, birthDate, cpf, allergies, aestheticGoals, medicalNotes } = req.body;
-  const newId = 'cli-' + Date.now();
-  const today = new Date().toISOString().split('T')[0];
-
-  try {
-    await pool.query(
-      `INSERT INTO clients (id, name, phone, email, birth_date, cpf, first_visit_date, total_visits, allergies, aesthetic_goals, medical_notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-      [newId, name, phone, email || '', birthDate || null, cpf || null, today, allergies || '', aestheticGoals || '', medicalNotes || '']
-    );
-
-    res.json({
-      status: 'success',
-      client: {
-        id: newId,
-        name,
-        phone,
-        email,
-        birthDate,
-        cpf,
-        firstVisitDate: today,
-        totalVisits: 1,
-        allergies,
-        aestheticGoals,
-        medicalNotes,
-        history: [],
-        beforeAfterPhotos: [],
-        createdAt: new Date().toISOString()
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  const { id, name, phone, email, birthDate, cpf, allergies, aestheticGoals, medicalNotes, firstVisitDate, totalVisits } = req.body;
+  
+  if (!name || !phone) {
+    return res.status(400).json({ error: 'Nome e telefone são obrigatórios para cadastrar o paciente.' });
   }
+
+  const newId = id || ('cli-' + Date.now());
+  const today = firstVisitDate || new Date().toISOString().split('T')[0];
+  const visits = totalVisits || 1;
+
+  const clientObj = {
+    id: newId,
+    name,
+    phone,
+    email: email || '',
+    birthDate: birthDate || '',
+    cpf: cpf || '',
+    firstVisitDate: today,
+    totalVisits: visits,
+    allergies: allergies || 'Nenhuma informada',
+    contraindications: '',
+    aestheticGoals: aestheticGoals || '',
+    medicalNotes: medicalNotes || 'Nenhuma informada',
+    history: [],
+    beforeAfterPhotos: [],
+    createdAt: new Date().toISOString()
+  };
+
+  if (pool) {
+    try {
+      await ensureClientsTable(pool);
+      await pool.query(
+        `INSERT INTO clients (id, name, phone, email, birth_date, cpf, first_visit_date, total_visits, allergies, aesthetic_goals, medical_notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           name = VALUES(name),
+           phone = VALUES(phone),
+           email = VALUES(email),
+           birth_date = VALUES(birth_date),
+           cpf = VALUES(cpf),
+           first_visit_date = VALUES(first_visit_date),
+           total_visits = VALUES(total_visits),
+           allergies = VALUES(allergies),
+           aesthetic_goals = VALUES(aesthetic_goals),
+           medical_notes = VALUES(medical_notes)`,
+        [
+          newId,
+          name,
+          phone,
+          email || '',
+          birthDate || null,
+          cpf || null,
+          today,
+          visits,
+          allergies || 'Nenhuma informada',
+          aestheticGoals || '',
+          medicalNotes || 'Nenhuma informada'
+        ]
+      );
+    } catch (err: any) {
+      console.error('Error creating client in MySQL:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const currentLocal = readLocalClients();
+  const existingIdx = currentLocal.findIndex(c => c.id === newId);
+  if (existingIdx >= 0) {
+    currentLocal[existingIdx] = { ...currentLocal[existingIdx], ...clientObj };
+  } else {
+    currentLocal.unshift(clientObj);
+  }
+  writeLocalClients(currentLocal);
+
+  res.json({
+    status: 'success',
+    client: clientObj
+  });
 });
 
 app.post('/api/clients/:id/history', async (req, res) => {
   const pool = getMySqlPool();
-  if (!pool) return res.status(500).json({ error: 'MySQL offline' });
-
   const clientId = req.params.id;
-  const { date, procedure, productUsed, lotNumber, notes, returnDate } = req.body;
-  const histId = 'hist-' + Date.now();
+  const { id, date, procedure, productUsed, lotNumber, notes, returnDate } = req.body;
 
-  try {
-    await pool.query(
-      `INSERT INTO client_procedure_history (id, client_id, procedure_date, procedure_name, product_used, lot_number, notes, return_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [histId, clientId, date, procedure, productUsed || '', lotNumber || '', notes || '', returnDate || '']
-    );
-
-    // Increment total visits
-    await pool.query('UPDATE clients SET total_visits = total_visits + 1 WHERE id = ?', [clientId]);
-
-    res.json({
-      status: 'success',
-      historyItem: {
-        id: histId,
-        date,
-        procedure,
-        productUsed,
-        lotNumber,
-        notes,
-        returnDate
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  if (!procedure || !date) {
+    return res.status(400).json({ error: 'Procedimento e data são obrigatórios.' });
   }
+
+  const histId = id || ('hist-' + Date.now());
+  const historyItem = {
+    id: histId,
+    date,
+    procedure,
+    productUsed: productUsed || '',
+    lotNumber: lotNumber || '',
+    notes: notes || '',
+    returnDate: returnDate || ''
+  };
+
+  if (pool) {
+    try {
+      await ensureClientsTable(pool);
+      await pool.query(
+        `INSERT INTO client_procedure_history (id, client_id, procedure_date, procedure_name, product_used, lot_number, notes, return_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [histId, clientId, date, procedure, productUsed || '', lotNumber || '', notes || '', returnDate || '']
+      );
+
+      // Increment total visits in clients table
+      await pool.query('UPDATE clients SET total_visits = total_visits + 1 WHERE id = ?', [clientId]);
+    } catch (err: any) {
+      console.error('Error inserting client history in MySQL:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // Update local file cache
+  const currentLocal = readLocalClients();
+  const client = currentLocal.find(c => c.id === clientId);
+  if (client) {
+    if (!client.history) client.history = [];
+    client.history.unshift(historyItem);
+    client.totalVisits = (client.totalVisits || 0) + 1;
+    writeLocalClients(currentLocal);
+  }
+
+  res.json({
+    status: 'success',
+    historyItem
+  });
+});
+
+app.delete('/api/clients/:clientId/history/:historyId', async (req, res) => {
+  const { clientId, historyId } = req.params;
+  const pool = getMySqlPool();
+
+  if (pool) {
+    try {
+      await ensureClientsTable(pool);
+      await pool.query('DELETE FROM client_procedure_history WHERE id = ? AND client_id = ?', [historyId, clientId]);
+      await pool.query('UPDATE clients SET total_visits = GREATEST(1, total_visits - 1) WHERE id = ?', [clientId]);
+    } catch (err: any) {
+      console.error('Error deleting procedure history from MySQL:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const currentLocal = readLocalClients();
+  const client = currentLocal.find(c => c.id === clientId);
+  if (client && client.history) {
+    client.history = client.history.filter(h => h.id !== historyId);
+    client.totalVisits = Math.max(1, (client.totalVisits || 1) - 1);
+    writeLocalClients(currentLocal);
+  }
+
+  res.json({ status: 'success', message: 'Registro de procedimento removido com sucesso' });
 });
 
 app.put('/api/clients/:id', async (req, res) => {
   const pool = getMySqlPool();
   const clientId = req.params.id;
-  const { name, phone, email, birthDate, cpf, allergies, aestheticGoals, medicalNotes } = req.body;
+  const { name, phone, email, birthDate, cpf, firstVisitDate, totalVisits, allergies, aestheticGoals, medicalNotes } = req.body;
 
   if (pool) {
     try {
+      await ensureClientsTable(pool);
       await pool.query(
         `UPDATE clients SET
-           allergies = COALESCE(?, allergies),
-           aesthetic_goals = COALESCE(?, aesthetic_goals),
-           medical_notes = COALESCE(?, medical_notes),
            name = COALESCE(?, name),
            phone = COALESCE(?, phone),
-           email = COALESCE(?, email)
+           email = COALESCE(?, email),
+           birth_date = COALESCE(?, birth_date),
+           cpf = COALESCE(?, cpf),
+           first_visit_date = COALESCE(?, first_visit_date),
+           total_visits = COALESCE(?, total_visits),
+           allergies = COALESCE(?, allergies),
+           aesthetic_goals = COALESCE(?, aesthetic_goals),
+           medical_notes = COALESCE(?, medical_notes)
          WHERE id = ?`,
         [
-          allergies !== undefined ? allergies : null,
-          aestheticGoals !== undefined ? aestheticGoals : null,
-          medicalNotes !== undefined ? medicalNotes : null,
           name !== undefined ? name : null,
           phone !== undefined ? phone : null,
           email !== undefined ? email : null,
+          birthDate !== undefined ? birthDate : null,
+          cpf !== undefined ? cpf : null,
+          firstVisitDate !== undefined ? firstVisitDate : null,
+          totalVisits !== undefined ? totalVisits : null,
+          allergies !== undefined ? allergies : null,
+          aestheticGoals !== undefined ? aestheticGoals : null,
+          medicalNotes !== undefined ? medicalNotes : null,
           clientId
         ]
       );
     } catch (err: any) {
-      console.warn('MySQL update client failed:', err.message);
+      console.error('MySQL update client failed:', err.message);
+      return res.status(500).json({ error: err.message });
     }
+  }
+
+  const currentLocal = readLocalClients();
+  const clientIdx = currentLocal.findIndex(c => c.id === clientId);
+  if (clientIdx >= 0) {
+    currentLocal[clientIdx] = { ...currentLocal[clientIdx], ...req.body };
+    writeLocalClients(currentLocal);
   }
 
   res.json({
@@ -431,6 +920,27 @@ app.put('/api/clients/:id', async (req, res) => {
     id: clientId,
     updates: req.body
   });
+});
+
+app.delete('/api/clients/:id', async (req, res) => {
+  const { id } = req.params;
+  const pool = getMySqlPool();
+
+  if (pool) {
+    try {
+      await ensureClientsTable(pool);
+      await pool.query('DELETE FROM client_procedure_history WHERE client_id = ?', [id]);
+      await pool.query('DELETE FROM clients WHERE id = ?', [id]);
+    } catch (err: any) {
+      console.error('Error deleting client from MySQL:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const currentLocal = readLocalClients().filter(c => c.id !== id);
+  writeLocalClients(currentLocal);
+
+  res.json({ status: 'success', message: 'Paciente e histórico removidos com sucesso' });
 });
 
 // ----------------------------------------------------
@@ -571,7 +1081,7 @@ function writeLocalProcedures(procedures: any[]) {
 }
 
 function normalizeProcedureImageUrl(url: any): string {
-  if (!url || typeof url !== 'string') return '/uploads/tricoscopia.jpg';
+  if (!url || typeof url !== 'string') return '/uploads/transplante.jpg';
   let clean = url.trim();
   if (clean.startsWith('uploads/')) {
     clean = '/' + clean;
@@ -677,7 +1187,16 @@ app.post('/api/procedures', async (req, res) => {
   }
 
   const id = proc.id || 'proc-' + Date.now();
-  const processedImage = normalizeProcedureImageUrl(proc.imageUrl);
+  let processedImage = proc.imageUrl;
+  if (processedImage && typeof processedImage === 'string') {
+    if (processedImage.startsWith('data:')) {
+      processedImage = await saveBase64ImageIfPresentAsync(processedImage, 'proc');
+    } else {
+      processedImage = normalizeProcedureImageUrl(processedImage);
+    }
+  } else {
+    processedImage = normalizeProcedureImageUrl(null);
+  }
 
   const newProc = {
     id,
@@ -750,7 +1269,11 @@ app.put('/api/procedures/:id', async (req, res) => {
   const updates = { ...req.body };
 
   if (updates.imageUrl !== undefined && updates.imageUrl !== null && typeof updates.imageUrl === 'string') {
-    updates.imageUrl = normalizeProcedureImageUrl(updates.imageUrl);
+    if (updates.imageUrl.startsWith('data:')) {
+      updates.imageUrl = await saveBase64ImageIfPresentAsync(updates.imageUrl, 'proc');
+    } else {
+      updates.imageUrl = normalizeProcedureImageUrl(updates.imageUrl);
+    }
   }
 
   const pool = getMySqlPool();
@@ -767,7 +1290,7 @@ app.put('/api/procedures/:id', async (req, res) => {
           downtime = COALESCE(?, downtime),
           ideal_for = COALESCE(?, ideal_for),
           benefits = COALESCE(?, benefits),
-          image_url = COALESCE(?, image_url),
+          image_url = CASE WHEN ? IS NOT NULL THEN ? ELSE image_url END,
           popular = COALESCE(?, popular),
           faq = COALESCE(?, faq)
         WHERE id = ?
@@ -780,7 +1303,8 @@ app.put('/api/procedures/:id', async (req, res) => {
         updates.downtime ?? null,
         updates.idealFor ? JSON.stringify(updates.idealFor) : null,
         updates.benefits ? JSON.stringify(updates.benefits) : null,
-        updates.imageUrl ?? null,
+        updates.imageUrl !== undefined ? updates.imageUrl : null,
+        updates.imageUrl !== undefined ? updates.imageUrl : null,
         updates.popular !== undefined ? (updates.popular ? 1 : 0) : null,
         updates.faq ? JSON.stringify(updates.faq) : null,
         id
@@ -813,7 +1337,7 @@ app.put('/api/procedures/:id', async (req, res) => {
           updates.downtime ?? 'Sem downtime',
           JSON.stringify(updates.idealFor || []),
           JSON.stringify(updates.benefits || []),
-          updates.imageUrl || '/uploads/tricoscopia.jpg',
+          updates.imageUrl || '/uploads/transplante.jpg',
           updates.popular ? 1 : 0,
           JSON.stringify(updates.faq || [])
         ]);
@@ -841,7 +1365,7 @@ app.put('/api/procedures/:id', async (req, res) => {
       downtime: updates.downtime || 'Sem downtime',
       idealFor: updates.idealFor || [],
       benefits: updates.benefits || [],
-      imageUrl: updates.imageUrl || '/uploads/tricoscopia.jpg',
+      imageUrl: updates.imageUrl || '/uploads/transplante.jpg',
       popular: Boolean(updates.popular),
       faq: updates.faq || []
     };

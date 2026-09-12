@@ -184,9 +184,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setProceduresList(e.detail);
       }
     };
+    const handleAppointmentsUpdate = (e: any) => {
+      if (Array.isArray(e.detail)) {
+        setAppointments(e.detail);
+      }
+    };
+    const handleClientsUpdate = (e: any) => {
+      if (Array.isArray(e.detail)) {
+        setClients(e.detail);
+        setSelectedClient(prev => {
+          if (!prev) return null;
+          return e.detail.find((c: any) => c.id === prev.id) || prev;
+        });
+      }
+    };
+
     window.addEventListener('procedures-updated', handleProceduresUpdate as EventListener);
+    window.addEventListener('appointments-updated', handleAppointmentsUpdate as EventListener);
+    window.addEventListener('clients-updated', handleClientsUpdate as EventListener);
+
     return () => {
       window.removeEventListener('procedures-updated', handleProceduresUpdate as EventListener);
+      window.removeEventListener('appointments-updated', handleAppointmentsUpdate as EventListener);
+      window.removeEventListener('clients-updated', handleClientsUpdate as EventListener);
     };
   }, []);
 
@@ -202,6 +222,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setProceduresList(storageService.getProcedures());
     setAdminWhatsappNumber(storageService.getWhatsappNumber());
     setAdminWhatsappDisplay(storageService.getWhatsappDisplay());
+
+    // Fetch live appointments directly from MySQL database
+    storageService.fetchLiveAppointments().then(apts => {
+      if (Array.isArray(apts)) setAppointments(apts);
+    }).catch(() => {});
+
+    // Fetch live clients & clinical history directly from MySQL database
+    storageService.fetchLiveClients().then(clis => {
+      if (Array.isArray(clis)) {
+        setClients(clis);
+        setSelectedClient(prev => {
+          if (!prev) return null;
+          return clis.find(c => c.id === prev.id) || prev;
+        });
+      }
+    }).catch(() => {});
 
     storageService.fetchLiveProcedures().then(procs => {
       if (Array.isArray(procs) && procs.length > 0) setProceduresList(procs);
@@ -369,20 +405,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   // Appointment actions
-  const handleUpdateStatus = (id: string, newStatus: Appointment['status']) => {
-    storageService.updateAppointmentStatus(id, newStatus);
+  const handleUpdateStatus = async (id: string, newStatus: Appointment['status']) => {
+    await storageService.updateAppointmentStatusLive(id, newStatus);
+    await storageService.fetchLiveAppointments();
     loadAllData();
     onDataChanged();
   };
 
-  const handleSendReminderPush = (apt: Appointment) => {
+  const handleDeleteAppointment = async (id: string, clientName?: string) => {
+    if (!confirm(`Deseja realmente remover o agendamento ${clientName ? `de "${clientName}"` : ''}?`)) return;
+    await storageService.deleteAppointmentLive(id);
+    await storageService.fetchLiveAppointments();
+    loadAllData();
+    onDataChanged();
+  };
+
+  const handleSendReminderPush = async (apt: Appointment) => {
     notificationService.triggerAppointmentReminder(
       apt.clientName,
       apt.procedureTitle,
       apt.date,
       apt.time
     );
-    storageService.markReminderSent(apt.id);
+    await storageService.markReminderSentLive(apt.id);
     loadAllData();
     alert(`Lembrete push disparado com sucesso para ${apt.clientName}!`);
   };
@@ -393,11 +438,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   // Client actions
-  const handleCreateClient = (e: React.FormEvent) => {
+  const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCliName || !newCliPhone) return;
 
-    const newClient = storageService.addClient({
+    const newClient = await storageService.addClientLive({
       name: newCliName,
       phone: newCliPhone,
       email: newCliEmail,
@@ -417,16 +462,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setNewCliGoals('');
     setNewCliMedicalNotes('');
     setShowAddClientModal(false);
+    await storageService.fetchLiveClients();
     loadAllData();
     setSelectedClient(newClient);
     onDataChanged();
   };
 
-  const handleAddProcedureToHistory = (e: React.FormEvent) => {
+  const handleAddProcedureToHistory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedClient) return;
 
-    storageService.addProcedureToClientHistory(selectedClient.id, {
+    await storageService.addProcedureToClientHistoryLive(selectedClient.id, {
       date: newHistDate,
       procedure: newHistProcedure,
       productUsed: newHistProduct,
@@ -435,13 +481,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       returnDate: newHistReturn || undefined
     });
 
-    // Refresh client
-    const updatedClients = storageService.getClients();
-    setClients(updatedClients);
-    const updated = updatedClients.find(c => c.id === selectedClient.id) || null;
+    // Refresh clients directly from MySQL
+    const freshClients = await storageService.fetchLiveClients();
+    setClients(freshClients);
+    const updated = freshClients.find(c => c.id === selectedClient.id) || null;
     setSelectedClient(updated);
     setShowAddProcedureHistory(false);
     setNewHistNotes('');
+    onDataChanged();
+  };
+
+  const handleDeleteProcedureHistory = async (historyId: string) => {
+    if (!selectedClient) return;
+    if (!confirm('Deseja remover este registro do histórico clínico do paciente?')) return;
+    await storageService.deleteProcedureHistoryLive(selectedClient.id, historyId);
+    const freshClients = await storageService.fetchLiveClients();
+    setClients(freshClients);
+    const updated = freshClients.find(c => c.id === selectedClient.id) || null;
+    setSelectedClient(updated);
     onDataChanged();
   };
 
@@ -453,17 +510,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setIsEditingClientAnamnesis(true);
   };
 
-  const handleSaveClientAnamnesis = () => {
+  const handleSaveClientAnamnesis = async () => {
     if (!selectedClient) return;
     setIsSavingClientAnamnesis(true);
-    const updated = storageService.updateClient(selectedClient.id, {
+    const updated = await storageService.updateClientLive(selectedClient.id, {
       allergies: editClientAllergies,
       aestheticGoals: editClientGoals,
       medicalNotes: editClientMedicalNotes
     });
     if (updated) {
       setSelectedClient(updated);
-      setClients(storageService.getClients());
+      const freshClients = await storageService.fetchLiveClients();
+      setClients(freshClients);
       setClientAnamnesisSuccessMsg('Informações clínicas salvas no prontuário com sucesso!');
       setTimeout(() => setClientAnamnesisSuccessMsg(''), 4000);
       onDataChanged();
@@ -1223,6 +1281,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <option value="realizado">Realizado</option>
                               <option value="cancelado">Cancelar</option>
                             </select>
+
+                            {/* Delete appointment */}
+                            <button
+                              onClick={() => handleDeleteAppointment(apt.id, apt.clientName)}
+                              className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              title="Remover agendamento do banco de dados"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -1574,6 +1641,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                         Retorno: {hist.returnDate}
                                       </span>
                                     )}
+                                    <button
+                                      onClick={() => handleDeleteProcedureHistory(hist.id)}
+                                      className="p-1 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer ml-1"
+                                      title="Remover procedimento do histórico"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                   </div>
                                 </div>
 

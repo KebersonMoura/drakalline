@@ -51,6 +51,25 @@ export interface AppNotification {
 
 class StorageService {
   // Appointments
+  async fetchLiveAppointments(): Promise<Appointment[]> {
+    try {
+      const res = await fetch('/api/appointments');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          this.saveAppointments(data);
+          try {
+            window.dispatchEvent(new CustomEvent('appointments-updated', { detail: data }));
+          } catch (_) {}
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch live appointments from MySQL:', err);
+    }
+    return this.getAppointments();
+  }
+
   getAppointments(): Appointment[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.APPOINTMENTS);
@@ -67,6 +86,11 @@ class StorageService {
       localStorage.setItem(STORAGE_KEYS.APPOINTMENTS, JSON.stringify(appointments));
     } catch (e) {
       console.error('Error saving appointments', e);
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('appointments-updated', { detail: appointments }));
+      } catch (_) {}
     }
   }
 
@@ -106,13 +130,82 @@ class StorageService {
     return newAppointment;
   }
 
+  async addAppointmentLive(appointment: Omit<Appointment, 'id' | 'createdAt' | 'status' | 'reminderSent'>): Promise<Appointment> {
+    const newId = 'apt-' + Date.now();
+    const newAppointment: Appointment = {
+      ...appointment,
+      id: newId,
+      status: 'pendente',
+      reminderSent: false,
+      createdAt: new Date().toISOString()
+    };
+
+    // Optimistically save locally
+    const list = this.getAppointments();
+    list.unshift(newAppointment);
+    this.saveAppointments(list);
+    this.autoSyncClientFromAppointment(newAppointment);
+
+    try {
+      const res = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAppointment)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.appointment) {
+          // Update in local cache with server data
+          const updatedList = this.getAppointments().map(a => a.id === newId ? json.appointment : a);
+          this.saveAppointments(updatedList);
+          // Also fetch fresh clients to reflect new client created in MySQL
+          this.fetchLiveClients().catch(() => {});
+          return json.appointment;
+        }
+      }
+    } catch (err) {
+      console.warn('Error saving appointment to MySQL:', err);
+    }
+
+    return newAppointment;
+  }
+
   updateAppointmentStatus(id: string, status: Appointment['status']): Appointment | null {
     const list = this.getAppointments();
     const index = list.findIndex(a => a.id === id);
     if (index === -1) return null;
     list[index].status = status;
     this.saveAppointments(list);
+
+    // Sync with MySQL
+    try {
+      fetch(`/api/appointments/${encodeURIComponent(id)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      }).catch(err => console.warn('Async status update error:', err));
+    } catch (e) {}
+
     return list[index];
+  }
+
+  async updateAppointmentStatusLive(id: string, status: Appointment['status']): Promise<void> {
+    const list = this.getAppointments();
+    const index = list.findIndex(a => a.id === id);
+    if (index !== -1) {
+      list[index].status = status;
+      this.saveAppointments(list);
+    }
+
+    try {
+      await fetch(`/api/appointments/${encodeURIComponent(id)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+    } catch (err) {
+      console.warn('Error updating status in MySQL:', err);
+    }
   }
 
   markReminderSent(id: string): void {
@@ -122,9 +215,58 @@ class StorageService {
       list[index].reminderSent = true;
       this.saveAppointments(list);
     }
+
+    try {
+      fetch(`/api/appointments/${encodeURIComponent(id)}/reminder`, {
+        method: 'PATCH'
+      }).catch(err => console.warn('Async reminder mark error:', err));
+    } catch (e) {}
+  }
+
+  async markReminderSentLive(id: string): Promise<void> {
+    this.markReminderSent(id);
+    try {
+      await fetch(`/api/appointments/${encodeURIComponent(id)}/reminder`, {
+        method: 'PATCH'
+      });
+    } catch (err) {
+      console.warn('Error marking reminder sent in MySQL:', err);
+    }
+  }
+
+  async deleteAppointmentLive(id: string): Promise<void> {
+    const list = this.getAppointments().filter(a => a.id !== id);
+    this.saveAppointments(list);
+
+    try {
+      await fetch(`/api/appointments/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.warn('Error deleting appointment from MySQL:', err);
+    }
   }
 
   // Clients & Clinical History
+  async fetchLiveClients(): Promise<ClientRecord[]> {
+    try {
+      const res = await fetch('/api/clients');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          this.saveClients(data);
+          try {
+            window.dispatchEvent(new CustomEvent('clients-updated', { detail: data }));
+          } catch (_) {}
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch live clients from MySQL:', err);
+    }
+    return this.getClients();
+  }
+
   getClients(): ClientRecord[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.CLIENTS);
@@ -142,18 +284,68 @@ class StorageService {
     } catch (e) {
       console.error('Error saving clients', e);
     }
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('clients-updated', { detail: clients }));
+      } catch (_) {}
+    }
   }
 
   addClient(clientData: Omit<ClientRecord, 'id' | 'createdAt' | 'totalVisits'>): ClientRecord {
     const clients = this.getClients();
+    const newId = 'cli-' + Date.now();
     const newClient: ClientRecord = {
       ...clientData,
-      id: 'cli-' + Date.now(),
+      id: newId,
       totalVisits: clientData.history?.length || 1,
       createdAt: new Date().toISOString()
     };
     clients.unshift(newClient);
     this.saveClients(clients);
+
+    // Sync with server if online
+    try {
+      fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newClient)
+      }).catch(err => console.warn('Async client save error:', err));
+    } catch (e) {}
+
+    return newClient;
+  }
+
+  async addClientLive(clientData: Omit<ClientRecord, 'id' | 'createdAt' | 'totalVisits'>): Promise<ClientRecord> {
+    const newId = 'cli-' + Date.now();
+    const newClient: ClientRecord = {
+      ...clientData,
+      id: newId,
+      totalVisits: clientData.history?.length || 1,
+      createdAt: new Date().toISOString()
+    };
+
+    const clients = this.getClients();
+    clients.unshift(newClient);
+    this.saveClients(clients);
+
+    try {
+      const res = await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newClient)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.client) {
+          const updated = this.getClients().map(c => c.id === newId ? json.client : c);
+          this.saveClients(updated);
+          return json.client;
+        }
+      }
+    } catch (err) {
+      console.warn('Error saving client to MySQL:', err);
+    }
+
     return newClient;
   }
 
@@ -176,6 +368,20 @@ class StorageService {
     return clients[index];
   }
 
+  async updateClientLive(id: string, updates: Partial<ClientRecord>): Promise<ClientRecord | null> {
+    const updated = this.updateClient(id, updates);
+    try {
+      await fetch(`/api/clients/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+    } catch (err) {
+      console.warn('Error updating client in MySQL:', err);
+    }
+    return updated;
+  }
+
   addProcedureToClientHistory(clientId: string, item: Omit<ProcedureHistoryItem, 'id'>): ProcedureHistoryItem | null {
     const clients = this.getClients();
     const client = clients.find(c => c.id === clientId);
@@ -191,7 +397,81 @@ class StorageService {
     client.totalVisits = (client.totalVisits || 0) + 1;
 
     this.saveClients(clients);
+
+    // Sync with MySQL backend
+    try {
+      fetch(`/api/clients/${encodeURIComponent(clientId)}/history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItem)
+      }).catch(err => console.warn('Async procedure history save error:', err));
+    } catch (e) {}
+
     return newItem;
+  }
+
+  async addProcedureToClientHistoryLive(clientId: string, item: Omit<ProcedureHistoryItem, 'id'>): Promise<ProcedureHistoryItem | null> {
+    const histId = 'hist-' + Date.now();
+    const newItem: ProcedureHistoryItem = {
+      ...item,
+      id: histId
+    };
+
+    const clients = this.getClients();
+    const client = clients.find(c => c.id === clientId);
+    if (client) {
+      if (!client.history) client.history = [];
+      client.history.unshift(newItem);
+      client.totalVisits = (client.totalVisits || 0) + 1;
+      this.saveClients(clients);
+    }
+
+    try {
+      const res = await fetch(`/api/clients/${encodeURIComponent(clientId)}/history`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItem)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.historyItem) return json.historyItem;
+      }
+    } catch (err) {
+      console.warn('Error saving procedure history to MySQL:', err);
+    }
+
+    return newItem;
+  }
+
+  async deleteProcedureHistoryLive(clientId: string, historyId: string): Promise<void> {
+    const clients = this.getClients();
+    const client = clients.find(c => c.id === clientId);
+    if (client && client.history) {
+      client.history = client.history.filter(h => h.id !== historyId);
+      client.totalVisits = Math.max(1, (client.totalVisits || 1) - 1);
+      this.saveClients(clients);
+    }
+
+    try {
+      await fetch(`/api/clients/${encodeURIComponent(clientId)}/history/${encodeURIComponent(historyId)}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.warn('Error deleting procedure history from MySQL:', err);
+    }
+  }
+
+  async deleteClientLive(id: string): Promise<void> {
+    const clients = this.getClients().filter(c => c.id !== id);
+    this.saveClients(clients);
+
+    try {
+      await fetch(`/api/clients/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.warn('Error deleting client from MySQL:', err);
+    }
   }
 
   private autoSyncClientFromAppointment(appointment: Appointment) {
@@ -220,6 +500,15 @@ class StorageService {
       };
       clients.unshift(newClient);
       this.saveClients(clients);
+
+      // Also persist to MySQL
+      try {
+        fetch('/api/clients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newClient)
+        }).catch(() => {});
+      } catch (_) {}
     }
   }
 
@@ -900,7 +1189,7 @@ class StorageService {
         downtime: updates.downtime || 'Sem downtime',
         idealFor: updates.idealFor || [],
         benefits: updates.benefits || [],
-        imageUrl: updates.imageUrl || '/uploads/tricoscopia.jpg',
+        imageUrl: updates.imageUrl || '/uploads/transplante.jpg',
         popular: Boolean(updates.popular),
         faq: updates.faq || []
       };
@@ -917,9 +1206,9 @@ class StorageService {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data?.procedure?.imageUrl && data.procedure.imageUrl !== updatedProc.imageUrl) {
-          updatedProc.imageUrl = data.procedure.imageUrl;
-          const freshList = this.getProcedures().map(p => p.id === id ? { ...p, ...data.procedure } : p);
+        if (data?.procedure) {
+          updatedProc = data.procedure;
+          const freshList = this.getProcedures().map(p => p.id === id ? data.procedure : p);
           this.saveProcedures(freshList);
         }
       }

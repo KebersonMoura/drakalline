@@ -159,3 +159,37 @@ export interface AdminUser {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export interface EmailSettings {
+  notificationEmail: string;
+  smtpHost?: string;
+  smtpPort?: number | string;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpSecure?: boolean;
+  smtpFrom?: string;
+}
+
+export interface DoctorSchedule {
+  id: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
+  clinicName: string;
+  isAvailable: boolean;
+  isBooked?: boolean;
+  bookedByName?: string | null;
+  bookedByPhone?: string | null;
+  appointmentId?: string | null;
+  appointmentStatus?: AppointmentStatus | null;
+  createdAt?: string;
+}
+
+export interface DayAvailabilityResponse {
+  date: string;
+  clinicName: string;
+  slots: {
+    time: string;
+    isBooked: boolean;
+    clinicName: string;
+  }[];
+}

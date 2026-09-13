@@ -7,7 +7,10 @@ import {
   DatabaseStatus,
   ProcedureHistoryItem,
   HeroSlide,
-  AdminUser
+  AdminUser,
+  EmailSettings,
+  DoctorSchedule,
+  DayAvailabilityResponse
 } from '../types';
 import { 
   INITIAL_APPOINTMENTS, 
@@ -38,6 +41,8 @@ const STORAGE_KEYS = {
   CLINIC_FULL_ADDRESS: 'dra_kaline_clinic_full_address_v2',
   CLINIC_MAPS_URL: 'dra_kaline_clinic_maps_url_v2',
   ADMIN_USERS: 'dra_kaline_admin_users_v2',
+  EMAIL_SETTINGS: 'dra_kaline_email_settings_v1',
+  DOCTOR_SCHEDULES: 'dra_kaline_doctor_schedules_v1',
 };
 
 export interface AppNotification {
@@ -140,34 +145,32 @@ class StorageService {
       createdAt: new Date().toISOString()
     };
 
-    // Optimistically save locally
-    const list = this.getAppointments();
-    list.unshift(newAppointment);
-    this.saveAppointments(list);
-    this.autoSyncClientFromAppointment(newAppointment);
-
     try {
       const res = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAppointment)
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.appointment) {
-          // Update in local cache with server data
-          const updatedList = this.getAppointments().map(a => a.id === newId ? json.appointment : a);
-          this.saveAppointments(updatedList);
-          // Also fetch fresh clients to reflect new client created in MySQL
-          this.fetchLiveClients().catch(() => {});
-          return json.appointment;
-        }
-      }
-    } catch (err) {
-      console.warn('Error saving appointment to MySQL:', err);
-    }
 
-    return newAppointment;
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({ error: 'Falha ao processar agendamento.' }));
+        throw new Error(errJson.error || 'Erro ao agendar consulta. Por favor, tente novamente.');
+      }
+
+      const json = await res.json();
+      const saved = json.appointment || newAppointment;
+
+      const list = this.getAppointments();
+      list.unshift(saved);
+      this.saveAppointments(list);
+      this.autoSyncClientFromAppointment(saved);
+      this.fetchLiveClients().catch(() => {});
+
+      return saved;
+    } catch (err: any) {
+      // Re-throw so form component displays friendly message
+      throw err;
+    }
   }
 
   updateAppointmentStatus(id: string, status: Appointment['status']): Appointment | null {
@@ -1579,6 +1582,223 @@ class StorageService {
 
     const filtered = currentUsers.filter(u => u.id !== id);
     this.saveAdminUsers(filtered);
+  }
+
+  // Email Notification Settings for Appointments
+  getEmailSettings(): EmailSettings {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.EMAIL_SETTINGS);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.warn('Error reading email settings', e);
+    }
+    return {
+      notificationEmail: 'keberson.carvalho@gmail.com',
+      smtpHost: '',
+      smtpPort: 587,
+      smtpUser: '',
+      smtpPass: '',
+      smtpSecure: false,
+      smtpFrom: 'Dra. Kaline - Agendamentos <agendamentos@drakaline.com.br>'
+    };
+  }
+
+  async fetchLiveEmailSettings(): Promise<EmailSettings> {
+    try {
+      const res = await fetch('/api/settings/email');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.notificationEmail) {
+          try {
+            localStorage.setItem(STORAGE_KEYS.EMAIL_SETTINGS, JSON.stringify(data));
+          } catch {}
+          return data;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch live email settings, using cached:', e);
+    }
+    return this.getEmailSettings();
+  }
+
+  async saveEmailSettingsLive(settings: Partial<EmailSettings>): Promise<any> {
+    try {
+      const res = await fetch('/api/settings/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const current = this.getEmailSettings();
+        const updated = { ...current, ...settings };
+        try {
+          localStorage.setItem(STORAGE_KEYS.EMAIL_SETTINGS, JSON.stringify(updated));
+        } catch {}
+        return data;
+      } else {
+        const err = await res.json();
+        throw new Error(err.error || 'Erro ao salvar configurações de e-mail');
+      }
+    } catch (e: any) {
+      console.warn('Backend save email settings failed, saving locally:', e);
+      const current = this.getEmailSettings();
+      const updated = { ...current, ...settings };
+      try {
+        localStorage.setItem(STORAGE_KEYS.EMAIL_SETTINGS, JSON.stringify(updated));
+      } catch {}
+      return { status: 'success', notificationEmail: settings.notificationEmail };
+    }
+  }
+
+  async sendTestEmailLive(targetEmail?: string): Promise<{ success: boolean; message: string; previewUrl?: string }> {
+    try {
+      const res = await fetch('/api/settings/email/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetEmail })
+      });
+      const data = await res.json();
+      return data;
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Falha na conexão ao enviar e-mail de teste.' };
+    }
+  }
+
+  // ----------------------------------------------------
+  // Doctor Schedules & Weekly Availability
+  // ----------------------------------------------------
+  async fetchDoctorSchedules(date?: string): Promise<DoctorSchedule[]> {
+    try {
+      const url = date ? `/api/schedules?date=${encodeURIComponent(date)}` : '/api/schedules';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          try {
+            localStorage.setItem(STORAGE_KEYS.DOCTOR_SCHEDULES, JSON.stringify(data));
+          } catch {}
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch doctor schedules from MySQL, checking local storage:', err);
+    }
+
+    try {
+      const cached = localStorage.getItem(STORAGE_KEYS.DOCTOR_SCHEDULES);
+      if (cached) {
+        const list: DoctorSchedule[] = JSON.parse(cached);
+        return date ? list.filter(s => s.date === date) : list;
+      }
+    } catch {}
+
+    return [];
+  }
+
+  async fetchDayAvailability(date: string): Promise<DayAvailabilityResponse> {
+    try {
+      const res = await fetch(`/api/schedules/available?date=${encodeURIComponent(date)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.slots) {
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('Error fetching day availability from server:', err);
+    }
+
+    // Default fallback
+    const defaultTimes = ['09:00', '10:00', '11:15', '14:00', '15:30', '16:45', '18:00'];
+    const apts = this.getAppointments().filter(a => a.date === date && a.status !== 'cancelado');
+    return {
+      date,
+      clinicName: 'Clínica Principal - Dra. Kaline (Vila Olímpia)',
+      slots: defaultTimes.map(t => ({
+        time: t,
+        isBooked: apts.some(a => a.time === t),
+        clinicName: 'Clínica Principal - Dra. Kaline (Vila Olímpia)'
+      }))
+    };
+  }
+
+  async saveDoctorSchedule(schedule: { date: string; time: string; clinicName: string; isAvailable?: boolean }): Promise<any> {
+    try {
+      const res = await fetch('/api/schedules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(schedule)
+      });
+      if (res.ok) {
+        return await res.json();
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Falha ao salvar horário' }));
+        throw new Error(err.error || 'Erro ao salvar horário');
+      }
+    } catch (err: any) {
+      console.warn('Error saving schedule via API:', err);
+      throw err;
+    }
+  }
+
+  async saveDoctorSchedulesBatch(payload: { dates: string[]; times: string[]; clinicName: string }): Promise<any> {
+    try {
+      const res = await fetch('/api/schedules/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        return await res.json();
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Falha ao criar grade de horários' }));
+        throw new Error(err.error || 'Erro ao criar grade de horários');
+      }
+    } catch (err: any) {
+      console.warn('Error saving batch schedules:', err);
+      throw err;
+    }
+  }
+
+  async deleteDoctorSchedule(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/schedules/${id}`, {
+        method: 'DELETE'
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn('Error deleting schedule:', err);
+      return false;
+    }
+  }
+
+  async deleteDoctorScheduleDate(date: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/schedules/date/${encodeURIComponent(date)}`, {
+        method: 'DELETE'
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn('Error deleting date schedules:', err);
+      return false;
+    }
+  }
+
+  async toggleDoctorScheduleAvailability(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/schedules/${id}/toggle`, {
+        method: 'PATCH'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.isAvailable;
+      }
+      return false;
+    } catch (err) {
+      console.warn('Error toggling schedule availability:', err);
+      return false;
+    }
   }
 }
 

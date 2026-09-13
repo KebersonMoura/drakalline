@@ -49,10 +49,10 @@ import {
   DatabaseStatus,
   ProcedureHistoryItem,
   HeroSlide,
-  AdminUser
+  AdminUser,
+  DoctorSchedule
 } from '../types';
 import { storageService } from '../services/storageService';
-import { notificationService } from '../services/notificationService';
 import { CLINIC_INFO } from '../data/initialData';
 import { ChangePhotoModal } from './ChangePhotoModal';
 import { ChangeLogoModal } from './ChangeLogoModal';
@@ -82,7 +82,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [showLoginPassword, setShowLoginPassword] = useState<boolean>(false);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'appointments' | 'clients' | 'procedures' | 'content' | 'database' | 'whatsapp' | 'users'>('appointments');
+  const [activeTab, setActiveTab] = useState<'appointments' | 'schedules' | 'clients' | 'procedures' | 'content' | 'database' | 'whatsapp' | 'users' | 'email'>('appointments');
 
   // Admin Users & Credentials State (Gravados no Banco de Dados)
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => storageService.getAdminUsers());
@@ -106,6 +106,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [addressSaving, setAddressSaving] = useState<boolean>(false);
   const [addressSuccessMsg, setAddressSuccessMsg] = useState<string>('');
 
+  // Email Settings & Notifications State
+  const [adminNotificationEmail, setAdminNotificationEmail] = useState<string>(() => storageService.getEmailSettings().notificationEmail || 'keberson.carvalho@gmail.com');
+  const [adminSmtpHost, setAdminSmtpHost] = useState<string>(() => storageService.getEmailSettings().smtpHost || '');
+  const [adminSmtpPort, setAdminSmtpPort] = useState<number>(() => storageService.getEmailSettings().smtpPort || 587);
+  const [adminSmtpUser, setAdminSmtpUser] = useState<string>(() => storageService.getEmailSettings().smtpUser || '');
+  const [adminSmtpPass, setAdminSmtpPass] = useState<string>('');
+  const [adminSmtpSecure, setAdminSmtpSecure] = useState<boolean>(() => storageService.getEmailSettings().smtpSecure || false);
+  const [adminSmtpFrom, setAdminSmtpFrom] = useState<string>(() => storageService.getEmailSettings().smtpFrom || 'Dra. Kaline - Agendamentos <agendamentos@drakaline.com.br>');
+  const [emailSaving, setEmailSaving] = useState<boolean>(false);
+  const [emailSuccessMsg, setEmailSuccessMsg] = useState<string>('');
+  const [emailErrorMsg, setEmailErrorMsg] = useState<string>('');
+  const [testEmailTarget, setTestEmailTarget] = useState<string>(() => storageService.getEmailSettings().notificationEmail || 'keberson.carvalho@gmail.com');
+  const [sendingTestEmail, setSendingTestEmail] = useState<boolean>(false);
+  const [testEmailResult, setTestEmailResult] = useState<{ success: boolean; message: string; previewUrl?: string } | null>(null);
+  const [resendingEmailId, setResendingEmailId] = useState<string | null>(null);
+
   // Data states
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -117,6 +133,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [appointmentFilter, setAppointmentFilter] = useState<string>('all');
   const [clientSearch, setClientSearch] = useState<string>('');
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
+
+  // Doctor Schedules & Availability State (Gravados no Banco de Dados)
+  const [doctorSchedules, setDoctorSchedules] = useState<DoctorSchedule[]>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState<boolean>(false);
+  const [scheduleDateFilter, setScheduleDateFilter] = useState<string>('');
+  const [scheduleSuccessMsg, setScheduleSuccessMsg] = useState<string>('');
+  const [scheduleErrorMsg, setScheduleErrorMsg] = useState<string>('');
+  
+  // Weekly Schedule Batch Generator
+  const [batchClinicName, setBatchClinicName] = useState<string>('Clínica Jardins - Dra. Kaline');
+  const [batchStartDate, setBatchStartDate] = useState<string>(() => {
+    const d = new Date();
+    return d.toISOString().split('T')[0];
+  });
+  const [batchEndDate, setBatchEndDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14); // Next 2 weeks
+    return d.toISOString().split('T')[0];
+  });
+  const [batchSelectedWeekdays, setBatchSelectedWeekdays] = useState<number[]>([1, 2, 3, 4, 5]); // Mon-Fri
+  const [batchSelectedTimes, setBatchSelectedTimes] = useState<string[]>([
+    '09:00', '10:00', '11:15', '14:00', '15:30', '16:45', '18:00'
+  ]);
+  const [isSavingBatch, setIsSavingBatch] = useState<boolean>(false);
+
+  // Single Slot Generator
+  const [singleDate, setSingleDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [singleTime, setSingleTime] = useState<string>('10:00');
+  const [singleClinic, setSingleClinic] = useState<string>('Clínica Jardins - Dra. Kaline');
+  const [isSavingSingle, setIsSavingSingle] = useState<boolean>(false);
 
   // Modals inside admin
   const [showAddProcedureHistory, setShowAddProcedureHistory] = useState<boolean>(false);
@@ -276,6 +322,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     storageService.fetchAdminUsersLive().then(users => {
       if (Array.isArray(users) && users.length > 0) setAdminUsers(users);
     }).catch(() => {});
+
+    // Fetch live email notification settings
+    storageService.fetchLiveEmailSettings().then(settings => {
+      if (settings && settings.notificationEmail) {
+        setAdminNotificationEmail(settings.notificationEmail);
+        setAdminSmtpHost(settings.smtpHost || '');
+        setAdminSmtpPort(settings.smtpPort || 587);
+        setAdminSmtpUser(settings.smtpUser || '');
+        if (settings.smtpPass) setAdminSmtpPass('••••••••');
+        setAdminSmtpSecure(Boolean(settings.smtpSecure));
+        setAdminSmtpFrom(settings.smtpFrom || 'Dra. Kaline - Agendamentos <agendamentos@drakaline.com.br>');
+        setTestEmailTarget(settings.notificationEmail);
+      }
+    }).catch(() => {});
+
+    // Fetch live doctor schedules from database
+    storageService.fetchDoctorSchedules().then(scheds => {
+      if (Array.isArray(scheds)) setDoctorSchedules(scheds);
+    }).catch(() => {});
   };
 
   const handleSaveWhatsappAdmin = async (e?: React.FormEvent) => {
@@ -420,21 +485,217 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     onDataChanged();
   };
 
-  const handleSendReminderPush = async (apt: Appointment) => {
-    notificationService.triggerAppointmentReminder(
-      apt.clientName,
-      apt.procedureTitle,
-      apt.date,
-      apt.time
-    );
-    await storageService.markReminderSentLive(apt.id);
-    loadAllData();
-    alert(`Lembrete push disparado com sucesso para ${apt.clientName}!`);
+  const handleSaveEmailSettingsAdmin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!adminNotificationEmail.trim()) {
+      setEmailErrorMsg('Por favor, informe o e-mail de destino dos agendamentos.');
+      return;
+    }
+    setEmailSaving(true);
+    setEmailSuccessMsg('');
+    setEmailErrorMsg('');
+    try {
+      await storageService.saveEmailSettingsLive({
+        notificationEmail: adminNotificationEmail.trim(),
+        smtpHost: adminSmtpHost.trim(),
+        smtpPort: Number(adminSmtpPort) || 587,
+        smtpUser: adminSmtpUser.trim(),
+        smtpPass: adminSmtpPass,
+        smtpSecure: adminSmtpSecure,
+        smtpFrom: adminSmtpFrom.trim()
+      });
+      setEmailSuccessMsg('Configurações de e-mail salvas com sucesso! Novos agendamentos serão enviados para este endereço.');
+      setTimeout(() => setEmailSuccessMsg(''), 5000);
+      onDataChanged();
+    } catch (err: any) {
+      setEmailErrorMsg(err.message || 'Erro ao salvar configurações de e-mail.');
+      setTimeout(() => setEmailErrorMsg(''), 5000);
+    } finally {
+      setEmailSaving(false);
+    }
+  };
+
+  const handleSendTestEmailAdmin = async () => {
+    const target = testEmailTarget.trim() || adminNotificationEmail.trim();
+    if (!target) {
+      setEmailErrorMsg('Informe um e-mail de destino para realizar o teste.');
+      return;
+    }
+    setSendingTestEmail(true);
+    setTestEmailResult(null);
+    setEmailErrorMsg('');
+    try {
+      const res = await storageService.sendTestEmailLive(target);
+      setTestEmailResult(res);
+      if (res.success) {
+        setEmailSuccessMsg(res.message);
+        setTimeout(() => setEmailSuccessMsg(''), 6000);
+      } else {
+        setEmailErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setTestEmailResult({ success: false, message: err.message || 'Falha ao conectar no servidor de e-mail.' });
+      setEmailErrorMsg(err.message || 'Falha ao disparar e-mail de teste.');
+    } finally {
+      setSendingTestEmail(false);
+    }
+  };
+
+  const handleResendAppointmentEmail = async (apt: Appointment) => {
+    setResendingEmailId(apt.id);
+    try {
+      const res = await fetch(`/api/appointments/${apt.id}/resend-email`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`E-mail com os dados de agendamento de "${apt.clientName}" enviado com sucesso para ${data.recipient || adminNotificationEmail}!`);
+        await storageService.markReminderSentLive(apt.id);
+        loadAllData();
+      } else {
+        alert(data.message || data.error || 'Erro ao enviar e-mail de agendamento.');
+      }
+    } catch (e: any) {
+      alert(`Falha ao conectar: ${e.message}`);
+    } finally {
+      setResendingEmailId(null);
+    }
   };
 
   const generateWhatsAppReminderUrl = (apt: Appointment) => {
     const text = `Olá, ${apt.clientName}! Aqui é da clínica da Dra. Kaline. 🤍%0A%0AGostaríamos de confirmar sua consulta agendada para o procedimento *${apt.procedureTitle}* no dia *${apt.date}* às *${apt.time}*.%0A%0AAlguma dúvida ou recomendação pré-atendimento que possamos ajudar?`;
     return `https://wa.me/${apt.clientPhone.replace(/\D/g, '')}?text=${text}`;
+  };
+
+  // Doctor Schedules actions
+  const handleLoadSchedules = async (dateFilter?: string) => {
+    setSchedulesLoading(true);
+    setScheduleErrorMsg('');
+    try {
+      const data = await storageService.fetchDoctorSchedules(dateFilter || undefined);
+      setDoctorSchedules(data);
+    } catch (err: any) {
+      setScheduleErrorMsg(err.message || 'Erro ao carregar horários da agenda.');
+    } finally {
+      setSchedulesLoading(false);
+    }
+  };
+
+  const handleSaveBatchSchedules = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setScheduleSuccessMsg('');
+    setScheduleErrorMsg('');
+
+    if (!batchClinicName.trim()) {
+      setScheduleErrorMsg('Informe o nome da clínica onde a médica estará atendendo.');
+      return;
+    }
+    if (batchSelectedTimes.length === 0) {
+      setScheduleErrorMsg('Selecione pelo menos um horário para disponibilizar.');
+      return;
+    }
+    if (batchSelectedWeekdays.length === 0) {
+      setScheduleErrorMsg('Selecione pelo menos um dia da semana.');
+      return;
+    }
+
+    setIsSavingBatch(true);
+    try {
+      const start = new Date(batchStartDate + 'T00:00:00');
+      const end = new Date(batchEndDate + 'T23:59:59');
+
+      if (start > end) {
+        setScheduleErrorMsg('A data inicial deve ser anterior ou igual à data final.');
+        setIsSavingBatch(false);
+        return;
+      }
+
+      const selectedDates: string[] = [];
+      const curr = new Date(start);
+
+      while (curr <= end) {
+        const dayOfWeek = curr.getDay(); // 0 = Sun, 1 = Mon ...
+        if (batchSelectedWeekdays.includes(dayOfWeek)) {
+          const yyyy = curr.getFullYear();
+          const mm = String(curr.getMonth() + 1).padStart(2, '0');
+          const dd = String(curr.getDate()).padStart(2, '0');
+          selectedDates.push(`${yyyy}-${mm}-${dd}`);
+        }
+        curr.setDate(curr.getDate() + 1);
+      }
+
+      if (selectedDates.length === 0) {
+        setScheduleErrorMsg('Nenhum dia correspondente aos dias da semana selecionados no período.');
+        setIsSavingBatch(false);
+        return;
+      }
+
+      const res = await storageService.saveDoctorSchedulesBatch({
+        dates: selectedDates,
+        times: batchSelectedTimes,
+        clinicName: batchClinicName.trim()
+      });
+      setScheduleSuccessMsg(`Grade semanal gravada com sucesso! ${res.count || selectedDates.length * batchSelectedTimes.length} horários salvos no banco de dados para ${batchClinicName}.`);
+      await handleLoadSchedules(scheduleDateFilter);
+      setTimeout(() => setScheduleSuccessMsg(''), 5000);
+    } catch (err: any) {
+      setScheduleErrorMsg(err.message || 'Erro ao gerar horários da semana.');
+    } finally {
+      setIsSavingBatch(false);
+    }
+  };
+
+  const handleSaveSingleSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!singleDate || !singleTime || !singleClinic.trim()) {
+      setScheduleErrorMsg('Preencha data, horário e a clínica.');
+      return;
+    }
+    setIsSavingSingle(true);
+    setScheduleSuccessMsg('');
+    setScheduleErrorMsg('');
+    try {
+      await storageService.saveDoctorSchedule({
+        date: singleDate,
+        time: singleTime,
+        clinicName: singleClinic.trim(),
+        isAvailable: true
+      });
+      setScheduleSuccessMsg(`Horário ${singleTime} do dia ${singleDate} salvo na clínica ${singleClinic}!`);
+      await handleLoadSchedules(scheduleDateFilter);
+      setTimeout(() => setScheduleSuccessMsg(''), 5000);
+    } catch (err: any) {
+      setScheduleErrorMsg(err.message || 'Erro ao salvar horário.');
+    } finally {
+      setIsSavingSingle(false);
+    }
+  };
+
+  const handleToggleScheduleAvailability = async (id: string) => {
+    try {
+      await storageService.toggleDoctorScheduleAvailability(id);
+      await handleLoadSchedules(scheduleDateFilter);
+    } catch (err: any) {
+      alert(`Erro: ${err.message}`);
+    }
+  };
+
+  const handleDeleteScheduleSlot = async (id: string, date: string, time: string) => {
+    if (!confirm(`Deseja remover o horário ${time} do dia ${date} da agenda da médica?`)) return;
+    try {
+      await storageService.deleteDoctorSchedule(id);
+      await handleLoadSchedules(scheduleDateFilter);
+    } catch (err: any) {
+      alert(`Erro: ${err.message}`);
+    }
+  };
+
+  const handleDeleteAllSlotsFromDate = async (date: string) => {
+    if (!confirm(`Deseja remover TODOS os horários cadastrados para o dia ${date}?`)) return;
+    try {
+      await storageService.deleteDoctorScheduleDate(date);
+      await handleLoadSchedules(scheduleDateFilter);
+    } catch (err: any) {
+      alert(`Erro: ${err.message}`);
+    }
   };
 
   // Client actions
@@ -1068,6 +1329,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </button>
 
                 <button
+                  onClick={() => { setActiveTab('schedules'); setSelectedClient(null); handleLoadSchedules(); }}
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    activeTab === 'schedules'
+                      ? 'bg-stone-900 text-white shadow-xs'
+                      : 'text-stone-700 hover:bg-stone-200/60'
+                  }`}
+                >
+                  <Clock className="w-4 h-4 text-[#aa907d]" />
+                  <span>Agenda da Médica</span>
+                  <span className="ml-auto text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded-full font-bold">
+                    {doctorSchedules.length}
+                  </span>
+                </button>
+
+                <button
                   onClick={() => setActiveTab('clients')}
                   className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                     activeTab === 'clients'
@@ -1154,6 +1430,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   )}
                 </button>
 
+                <button
+                  onClick={() => { setActiveTab('email'); setSelectedClient(null); }}
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    activeTab === 'email'
+                      ? 'bg-stone-900 text-white shadow-xs'
+                      : 'text-stone-700 hover:bg-stone-200/60'
+                  }`}
+                >
+                  <Mail className="w-4 h-4 text-amber-400" />
+                  <span>E-mail & Agendamentos</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 ml-auto" />
+                </button>
+
               </div>
 
               {/* Clinic mini badge */}
@@ -1225,7 +1514,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     : 'bg-rose-100 text-rose-800'
                                 }`}
                               >
-                                {apt.status}
+                                {apt.status === 'cancelado' ? 'Cancelado (Horário Liberado)' : apt.status}
                               </span>
                             </div>
 
@@ -1260,14 +1549,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <span>WhatsApp</span>
                             </a>
 
-                            {/* Push Reminder */}
+                            {/* E-mail Notification / Resend */}
                             <button
-                              onClick={() => handleSendReminderPush(apt)}
-                              className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold rounded-xl border border-amber-200 flex items-center gap-1.5 transition-colors cursor-pointer"
-                              title="Disparar notificação push imediata"
+                              onClick={() => handleResendAppointmentEmail(apt)}
+                              disabled={resendingEmailId === apt.id}
+                              className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold rounded-xl border border-amber-200 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                              title="Enviar ou reenviar dados do agendamento por e-mail"
                             >
-                              <Bell className="w-3.5 h-3.5 text-amber-700" />
-                              <span>Lembrete Push</span>
+                              {resendingEmailId === apt.id ? (
+                                <RefreshCw className="w-3.5 h-3.5 text-amber-700 animate-spin" />
+                              ) : (
+                                <Mail className="w-3.5 h-3.5 text-amber-700" />
+                              )}
+                              <span>{apt.reminderSent ? 'Reenviar E-mail' : 'Enviar E-mail'}</span>
                             </button>
 
                             {/* Change status dropdown */}
@@ -1279,7 +1573,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <option value="pendente">Pendente</option>
                               <option value="confirmado">Confirmar</option>
                               <option value="realizado">Realizado</option>
-                              <option value="cancelado">Cancelar</option>
+                              <option value="cancelado">Cancelar (Liberar Horário)</option>
                             </select>
 
                             {/* Delete appointment */}
@@ -1295,6 +1589,531 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* TAB: DOCTOR SCHEDULE & AVAILABILITY */}
+              {activeTab === 'schedules' && (
+                <div className="space-y-6">
+                  {/* Top Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-bold uppercase tracking-wider mb-1">
+                        <Clock className="w-3 h-3 text-amber-700" />
+                        Disponibilidade Médica em Tempo Real
+                      </div>
+                      <h3 className="font-serif text-2xl font-bold text-stone-900">
+                        Agenda Semanal da Doutora
+                      </h3>
+                      <p className="text-xs text-stone-500">
+                        Configure dias da semana, horários e clínicas de atuação. Os clientes só podem agendar horários livres cadastrados aqui.
+                      </p>
+                    </div>
+
+                    {/* Stats Counters */}
+                    <div className="flex items-center gap-2">
+                      <div className="px-3 py-1.5 bg-stone-100 rounded-xl text-center">
+                        <span className="block text-[10px] text-stone-500 font-medium">Total</span>
+                        <span className="text-xs font-bold text-stone-900">{doctorSchedules.length}</span>
+                      </div>
+                      <div className="px-3 py-1.5 bg-emerald-50 rounded-xl text-center border border-emerald-200">
+                        <span className="block text-[10px] text-emerald-600 font-medium">Disponíveis</span>
+                        <span className="text-xs font-bold text-emerald-700">
+                          {doctorSchedules.filter(s => !s.isBooked && s.isAvailable).length}
+                        </span>
+                      </div>
+                      <div className="px-3 py-1.5 bg-rose-50 rounded-xl text-center border border-rose-200">
+                        <span className="block text-[10px] text-rose-600 font-medium">Reservados</span>
+                        <span className="text-xs font-bold text-rose-700">
+                          {doctorSchedules.filter(s => s.isBooked).length}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Feedback Messages */}
+                  {scheduleSuccessMsg && (
+                    <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2.5 text-xs text-emerald-800 animate-in fade-in">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="font-medium">{scheduleSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {scheduleErrorMsg && (
+                    <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-2.5 text-xs text-rose-800 animate-in fade-in">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span className="font-medium">{scheduleErrorMsg}</span>
+                    </div>
+                  )}
+
+                  {/* Rule Banner */}
+                  <div className="p-4 bg-stone-50 border border-stone-200 rounded-2xl flex items-start gap-3 text-xs text-stone-700">
+                    <ShieldCheck className="w-5 h-5 text-[#aa907d] shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-bold text-stone-900">
+                        Regra de Proteção contra Conflitos & Cancelamento Automático:
+                      </p>
+                      <p className="text-stone-600 text-[11px] leading-relaxed">
+                        • <strong>Conflito Bloqueado:</strong> O sistema impede que dois clientes escolham o mesmo dia e horário.
+                        <br />
+                        • <strong>Retorno Automático:</strong> Caso o agendamento na aba <em>Agendamentos</em> seja marcado como <strong>"Cancelado"</strong>, a data e horário voltam automaticamente a ficar <strong>Disponíveis</strong> para novos pacientes.
+                        <br />
+                        • <strong>Gravação no Banco:</strong> Toda a grade e disponibilidade é sincronizada diretamente na tabela <code className="bg-stone-200 px-1 py-0.5 rounded text-[10px]">doctor_schedules</code> do MySQL.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* SECTION 1: WEEKLY BATCH GENERATOR */}
+                  <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs space-y-4">
+                    <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-stone-900 flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-[#aa907d]" />
+                          <span>Gerador da Grade da Semana</span>
+                        </h4>
+                        <p className="text-xs text-stone-500">
+                          Preencha a semana da doutora com dias, horários e a clínica que estará atuando.
+                        </p>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleSaveBatchSchedules} className="space-y-4">
+                      {/* Clinic Name */}
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                          1. Clínica / Consultório de Atuação *
+                        </label>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            required
+                            value={batchClinicName}
+                            onChange={(e) => setBatchClinicName(e.target.value)}
+                            placeholder="Ex: Clínica Jardins - Dra. Kaline"
+                            className="flex-1 px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d]"
+                          />
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {[
+                              'Clínica Jardins - Dra. Kaline',
+                              'Unidade Vila Olímpia',
+                              'Clínica Alphaville'
+                            ].map((preset) => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setBatchClinicName(preset)}
+                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] rounded-lg transition-colors"
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Date Range */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                            2. Data Inicial *
+                          </label>
+                          <input
+                            type="date"
+                            required
+                            value={batchStartDate}
+                            onChange={(e) => setBatchStartDate(e.target.value)}
+                            className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                            3. Data Final do Período *
+                          </label>
+                          <input
+                            type="date"
+                            required
+                            value={batchEndDate}
+                            onChange={(e) => setBatchEndDate(e.target.value)}
+                            className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 font-medium focus:outline-none focus:ring-2 focus:ring-[#aa907d]"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Weekday Selection */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-bold text-stone-700">
+                            4. Dias da Semana de Atendimento:
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setBatchSelectedWeekdays([1, 2, 3, 4, 5])}
+                              className="text-[10px] text-[#aa907d] hover:underline font-semibold"
+                            >
+                              Segunda a Sexta
+                            </button>
+                            <span className="text-stone-300">|</span>
+                            <button
+                              type="button"
+                              onClick={() => setBatchSelectedWeekdays([1, 2, 3, 4, 5, 6])}
+                              className="text-[10px] text-[#aa907d] hover:underline font-semibold"
+                            >
+                              Seg a Sábado
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-7 gap-2">
+                          {[
+                            { day: 1, label: 'Segunda' },
+                            { day: 2, label: 'Terça' },
+                            { day: 3, label: 'Quarta' },
+                            { day: 4, label: 'Quinta' },
+                            { day: 5, label: 'Sexta' },
+                            { day: 6, label: 'Sábado' },
+                            { day: 0, label: 'Domingo' }
+                          ].map(({ day, label }) => {
+                            const isChecked = batchSelectedWeekdays.includes(day);
+                            return (
+                              <button
+                                key={day}
+                                type="button"
+                                onClick={() => {
+                                  if (isChecked) {
+                                    setBatchSelectedWeekdays(prev => prev.filter(d => d !== day));
+                                  } else {
+                                    setBatchSelectedWeekdays(prev => [...prev, day]);
+                                  }
+                                }}
+                                className={`py-2 px-2 text-xs rounded-xl font-medium border text-center transition-all ${
+                                  isChecked
+                                    ? 'bg-stone-900 text-white border-stone-900 font-semibold'
+                                    : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Time Slots Selection */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-xs font-bold text-stone-700">
+                            5. Horários Disponíveis:
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setBatchSelectedTimes(['09:00', '10:00', '11:15', '14:00', '15:30', '16:45', '18:00'])}
+                              className="text-[10px] text-[#aa907d] hover:underline font-semibold"
+                            >
+                              Padrão Comercial
+                            </button>
+                            <span className="text-stone-300">|</span>
+                            <button
+                              type="button"
+                              onClick={() => setBatchSelectedTimes(['08:00', '09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00', '18:00'])}
+                              className="text-[10px] text-[#aa907d] hover:underline font-semibold"
+                            >
+                              Horas Cheias
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+                          {[
+                            '08:00', '09:00', '10:00', '11:15', '13:00', 
+                            '14:00', '15:30', '16:45', '18:00', '19:00'
+                          ].map((t) => {
+                            const isSelected = batchSelectedTimes.includes(t);
+                            return (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setBatchSelectedTimes(prev => prev.filter(x => x !== t));
+                                  } else {
+                                    setBatchSelectedTimes(prev => [...prev, t].sort());
+                                  }
+                                }}
+                                className={`py-2 px-2 text-xs rounded-xl font-medium border text-center transition-all ${
+                                  isSelected
+                                    ? 'bg-[#aa907d] text-white border-[#aa907d] font-semibold shadow-xs'
+                                    : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+                                }`}
+                              >
+                                {t}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Batch Submit */}
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={isSavingBatch}
+                          className="w-full sm:w-auto px-6 py-3 bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSavingBatch ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                              <span>Gravando no Banco de Dados...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4 text-emerald-400" />
+                              <span>Gravar Grade Semanal no Banco de Dados</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* SECTION 2: ADD SINGLE EXTRA SLOT */}
+                  <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs space-y-3">
+                    <h4 className="text-xs font-bold text-stone-900 flex items-center gap-2">
+                      <Plus className="w-4 h-4 text-[#aa907d]" />
+                      <span>Adicionar Horário Pontual</span>
+                    </h4>
+                    <form onSubmit={handleSaveSingleSchedule} className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-stone-700 mb-1">Data:</label>
+                        <input
+                          type="date"
+                          required
+                          value={singleDate}
+                          onChange={(e) => setSingleDate(e.target.value)}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-stone-700 mb-1">Horário:</label>
+                        <input
+                          type="time"
+                          required
+                          value={singleTime}
+                          onChange={(e) => setSingleTime(e.target.value)}
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-stone-700 mb-1">Clínica:</label>
+                        <input
+                          type="text"
+                          required
+                          value={singleClinic}
+                          onChange={(e) => setSingleClinic(e.target.value)}
+                          placeholder="Clínica"
+                          className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900"
+                        />
+                      </div>
+                      <div>
+                        <button
+                          type="submit"
+                          disabled={isSavingSingle}
+                          className="w-full py-2.5 bg-[#aa907d] hover:bg-[#947c6a] text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Adicionar Horário</span>
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* SECTION 3: SCHEDULE OVERVIEW TABLE & CONTROLS */}
+                  <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-2xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-stone-900 flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-[#aa907d]" />
+                          <span>Horários Cadastrados na Agenda</span>
+                        </h4>
+                        <p className="text-xs text-stone-500">
+                          Visualize e gerencie a ocupação, bloqueie ou libere horários específicos.
+                        </p>
+                      </div>
+
+                      {/* Filter by Date */}
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          value={scheduleDateFilter}
+                          onChange={(e) => {
+                            setScheduleDateFilter(e.target.value);
+                            handleLoadSchedules(e.target.value);
+                          }}
+                          className="px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900"
+                          title="Filtrar por data específica"
+                        />
+                        {scheduleDateFilter && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setScheduleDateFilter('');
+                              handleLoadSchedules('');
+                            }}
+                            className="text-xs text-stone-500 hover:text-stone-900 underline"
+                          >
+                            Ver Todos
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleLoadSchedules(scheduleDateFilter)}
+                          className="p-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl transition-colors"
+                          title="Recarregar do banco de dados"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${schedulesLoading ? 'animate-spin' : ''}`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {doctorSchedules.length === 0 ? (
+                      <div className="text-center py-12 text-stone-400 space-y-2">
+                        <Clock className="w-10 h-10 mx-auto stroke-1" />
+                        <p className="text-xs font-medium">Nenhum horário cadastrado para a data ou período selecionado.</p>
+                        <p className="text-[11px]">Utilize o gerador acima para adicionar a grade de horários da semana.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* Group schedules by date */}
+                        {(Array.from(new Set(doctorSchedules.map(s => s.scheduleDate))) as string[]).sort().map((dateStr) => {
+                          const dateSlots = doctorSchedules.filter(s => s.scheduleDate === dateStr);
+                          const clinicForDay = dateSlots[0]?.clinicName || 'Clínica Principal';
+
+                          return (
+                            <div key={dateStr} className="p-4 bg-stone-50/80 rounded-2xl border border-stone-200 space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-200/70 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <Calendar className="w-4 h-4 text-[#aa907d]" />
+                                  <span className="font-bold text-xs text-stone-900">
+                                    {dateStr}
+                                  </span>
+                                  <span className="text-xs text-stone-500">•</span>
+                                  <span className="text-xs font-medium text-[#aa907d] flex items-center gap-1">
+                                    <MapPin className="w-3 h-3" />
+                                    {clinicForDay}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] text-stone-500">
+                                    {dateSlots.filter(s => !s.isBooked).length} livres de {dateSlots.length}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAllSlotsFromDate(dateStr)}
+                                    className="text-[10px] text-rose-600 hover:text-rose-800 hover:underline cursor-pointer"
+                                  >
+                                    Excluir dia inteiro
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Slots grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                                {dateSlots.map((slot) => {
+                                  return (
+                                    <div
+                                      key={slot.id}
+                                      className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 ${
+                                        slot.isBooked
+                                          ? 'bg-rose-50/50 border-rose-200 text-stone-800'
+                                          : slot.isAvailable
+                                          ? 'bg-white border-stone-200 hover:border-stone-300'
+                                          : 'bg-stone-100 border-stone-200 text-stone-500'
+                                      }`}
+                                    >
+                                      <div className="flex items-start justify-between">
+                                        <div>
+                                          <div className="font-bold text-sm text-stone-900 flex items-center gap-1.5">
+                                            <Clock className="w-3.5 h-3.5 text-[#aa907d]" />
+                                            <span>{slot.scheduleTime}</span>
+                                          </div>
+                                          <div className="text-[10px] text-stone-500 mt-0.5">
+                                            {slot.clinicName}
+                                          </div>
+                                        </div>
+
+                                        {slot.isBooked ? (
+                                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800">
+                                            Ocupado
+                                          </span>
+                                        ) : slot.isAvailable ? (
+                                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                                            Disponível
+                                          </span>
+                                        ) : (
+                                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-stone-200 text-stone-700">
+                                            Pausado
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {/* Patient info if booked */}
+                                      {slot.isBooked && slot.bookedClientName && (
+                                        <div className="p-2 bg-white/80 rounded-lg border border-rose-200/80 text-[11px] space-y-0.5">
+                                          <div className="font-semibold text-stone-900 truncate">
+                                            {slot.bookedClientName}
+                                          </div>
+                                          {slot.bookedClientPhone && (
+                                            <div className="text-[10px] text-stone-500 flex items-center gap-1">
+                                              <Phone className="w-3 h-3" />
+                                              <span>{slot.bookedClientPhone}</span>
+                                            </div>
+                                          )}
+                                          <div className="text-[9px] text-rose-700 font-medium">
+                                            Status: {slot.appointmentStatus || 'agendado'}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Actions */}
+                                      <div className="flex items-center justify-between pt-1 border-t border-stone-200/50">
+                                        {!slot.isBooked && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleToggleScheduleAvailability(slot.id)}
+                                            className={`text-[10px] font-semibold hover:underline cursor-pointer ${
+                                              slot.isAvailable ? 'text-amber-700' : 'text-emerald-700'
+                                            }`}
+                                          >
+                                            {slot.isAvailable ? 'Pausar' : 'Ativar'}
+                                          </button>
+                                        )}
+                                        {slot.isBooked && (
+                                          <span className="text-[9px] text-stone-400 italic">
+                                            Liberado se cancelado
+                                          </span>
+                                        )}
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteScheduleSlot(slot.id, slot.scheduleDate, slot.scheduleTime)}
+                                          className="p-1 text-stone-400 hover:text-rose-600 rounded transition-colors ml-auto cursor-pointer"
+                                          title="Excluir horário"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2473,6 +3292,278 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <Download className="w-4 h-4 text-stone-600" />
                       <span>Baixar Backup (JSON)</span>
                     </button>
+                  </div>
+
+                </div>
+              )}
+
+              {/* TAB 8: EMAIL & APPOINTMENT NOTIFICATIONS */}
+              {activeTab === 'email' && (
+                <div className="space-y-6 max-w-4xl">
+                  {/* Top Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
+                    <div>
+                      <h3 className="font-serif text-2xl font-bold text-stone-900 flex items-center gap-2.5">
+                        <Mail className="w-6 h-6 text-amber-700" />
+                        <span>E-mail & Notificações de Agendamentos</span>
+                      </h3>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Defina o endereço de e-mail que receberá os agendamentos realizados pelos clientes no site
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 text-xs font-semibold rounded-full border border-emerald-200">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        Disparo por E-mail Ativo
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Feedback Messages */}
+                  {emailSuccessMsg && (
+                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-xs text-emerald-900">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <div className="space-y-0.5">
+                        <p className="font-bold">Sucesso!</p>
+                        <p>{emailSuccessMsg}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {emailErrorMsg && (
+                    <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-3 text-xs text-rose-900">
+                      <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                      <div className="space-y-0.5">
+                        <p className="font-bold">Aviso:</p>
+                        <p>{emailErrorMsg}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PRIMARY CARD: DESTINATION EMAIL */}
+                  <div className="bg-stone-50 border border-stone-200/90 rounded-3xl p-6 space-y-4">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900 bg-amber-100/70 px-2.5 py-1 rounded-full border border-amber-200">
+                        Destinatário Principal
+                      </span>
+                      <h4 className="font-serif text-lg font-bold text-stone-900 mt-2">
+                        Para qual e-mail devem ir os agendamentos?
+                      </h4>
+                      <p className="text-xs text-stone-600 mt-1 max-w-2xl leading-relaxed">
+                        Quando um cliente solicitar um pré-agendamento de consulta na página, uma notificação completa com todos os dados (nome do paciente, telefone/WhatsApp, data, horário e procedimento) será enviada automaticamente para o endereço cadastrado abaixo.
+                      </p>
+                    </div>
+
+                    <form onSubmit={handleSaveEmailSettingsAdmin} className="space-y-5 pt-2">
+                      <div>
+                        <label className="block text-xs font-bold text-stone-800 mb-1.5">
+                          E-mail de Destino do Agendamento *
+                        </label>
+                        <div className="relative max-w-xl">
+                          <input
+                            type="email"
+                            value={adminNotificationEmail}
+                            onChange={(e) => setAdminNotificationEmail(e.target.value)}
+                            placeholder="ex: seu-email@exemplo.com ou keberson.carvalho@gmail.com"
+                            className="w-full px-3.5 py-2.5 bg-white border border-stone-300 rounded-xl text-xs text-stone-900 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 pl-9"
+                            required
+                          />
+                          <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
+                        </div>
+                        <p className="text-[11px] text-stone-500 mt-1.5">
+                          Este é o e-mail onde você ou sua equipe receberão os alertas de novas consultas agendadas.
+                        </p>
+                      </div>
+
+                      {/* ADVANCED SMTP SETTINGS */}
+                      <div className="pt-4 border-t border-stone-200 space-y-4">
+                        <div>
+                          <h5 className="text-xs font-bold text-stone-800 uppercase tracking-wider">
+                            Configurações SMTP do Servidor de Envio (Opcional)
+                          </h5>
+                          <p className="text-[11px] text-stone-500 mt-0.5 max-w-2xl">
+                            Configure as credenciais SMTP do seu provedor de e-mail (ex: Gmail, Titan, Locaweb, Hostinger) para enviar a partir de um endereço personalizado. Caso deixe em branco, o sistema utilizará o despachador padrão com logs e registros integrados.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                              Servidor SMTP (Host)
+                            </label>
+                            <input
+                              type="text"
+                              value={adminSmtpHost}
+                              onChange={(e) => setAdminSmtpHost(e.target.value)}
+                              placeholder="ex: smtp.gmail.com ou mail.drakaline.com.br"
+                              className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                              Porta SMTP
+                            </label>
+                            <input
+                              type="number"
+                              value={adminSmtpPort}
+                              onChange={(e) => setAdminSmtpPort(Number(e.target.value))}
+                              placeholder="587 ou 465"
+                              className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                              Usuário SMTP / E-mail Remetente
+                            </label>
+                            <input
+                              type="text"
+                              value={adminSmtpUser}
+                              onChange={(e) => setAdminSmtpUser(e.target.value)}
+                              placeholder="ex: agendamentos@drakaline.com.br"
+                              className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                              Senha SMTP / Senha de Aplicativo
+                            </label>
+                            <input
+                              type="password"
+                              value={adminSmtpPass}
+                              onChange={(e) => setAdminSmtpPass(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                              Nome de Exibição do Remetente (From)
+                            </label>
+                            <input
+                              type="text"
+                              value={adminSmtpFrom}
+                              onChange={(e) => setAdminSmtpFrom(e.target.value)}
+                              placeholder="Dra. Kaline - Agendamentos <agendamentos@drakaline.com.br>"
+                              className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="checkbox"
+                            id="smtpSecureCheck"
+                            checked={adminSmtpSecure}
+                            onChange={(e) => setAdminSmtpSecure(e.target.checked)}
+                            className="w-4 h-4 rounded text-amber-700 focus:ring-amber-500 border-stone-300 cursor-pointer"
+                          />
+                          <label htmlFor="smtpSecureCheck" className="text-xs text-stone-700 font-medium cursor-pointer">
+                            Usar conexão segura SSL direta (Porta 465). Deixe desmarcado para TLS / STARTTLS (Porta 587).
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                        <button
+                          type="submit"
+                          disabled={emailSaving || !adminNotificationEmail.trim()}
+                          className="px-6 py-2.5 bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          {emailSaving ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                              <span>Salvando no Banco MySQL...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Salvar E-mail de Agendamentos</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* TEST EMAIL CARD */}
+                  <div className="bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-2xs">
+                    <div>
+                      <h4 className="font-serif text-lg font-bold text-stone-900">
+                        Testar Disparo de E-mail de Agendamento
+                      </h4>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Envie uma mensagem de demonstração para conferir se o e-mail está sendo entregue corretamente.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                      <div className="relative flex-1 w-full">
+                        <input
+                          type="email"
+                          value={testEmailTarget}
+                          onChange={(e) => setTestEmailTarget(e.target.value)}
+                          placeholder="Digite o e-mail para onde enviar o teste"
+                          className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500 pl-9"
+                        />
+                        <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-3" />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSendTestEmailAdmin}
+                        disabled={sendingTestEmail || !testEmailTarget.trim()}
+                        className="w-full sm:w-auto px-5 py-2.5 bg-amber-700 hover:bg-amber-800 text-white font-semibold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {sendingTestEmail ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Enviando Teste...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>Disparar E-mail de Teste</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {testEmailResult && (
+                      <div className={`p-4 rounded-2xl border text-xs space-y-2 ${
+                        testEmailResult.success 
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                          : 'bg-rose-50 border-rose-200 text-rose-900'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          {testEmailResult.success ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                          )}
+                          <span className="font-semibold">{testEmailResult.message}</span>
+                        </div>
+
+                        {testEmailResult.previewUrl && (
+                          <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between">
+                            <span className="text-[11px] text-emerald-700">Visualizar mensagem de teste enviada:</span>
+                            <a
+                              href={testEmailResult.previewUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 font-bold text-emerald-800 underline hover:text-emerald-950"
+                            >
+                              <span>Abrir E-mail Enviado</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                 </div>

@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { getMySqlPool, checkMySqlConnection } from './src/server/db';
+import nodemailer from 'nodemailer';
 
 const app = express();
 const PORT = 3000;
@@ -464,6 +465,241 @@ app.get('/api/appointments', async (req, res) => {
   }
 });
 
+// ----------------------------------------------------
+// Email Settings & Notification Dispatch Service
+// ----------------------------------------------------
+async function getEmailSettings(): Promise<{
+  notificationEmail: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  smtpSecure: boolean;
+  smtpFrom: string;
+}> {
+  const pool = getMySqlPool();
+  const local = getLocalClinicSettings();
+  let notificationEmail = local['notification_email'] || process.env.NOTIFICATION_EMAIL || 'keberson.carvalho@gmail.com';
+  let smtpHost = local['smtp_host'] || process.env.SMTP_HOST || '';
+  let smtpPort = Number(local['smtp_port'] || process.env.SMTP_PORT || 587);
+  let smtpUser = local['smtp_user'] || process.env.SMTP_USER || '';
+  let smtpPass = local['smtp_pass'] || process.env.SMTP_PASS || '';
+  let smtpSecure = local['smtp_secure'] === 'true' || process.env.SMTP_SECURE === 'true';
+  let smtpFrom = local['smtp_from'] || process.env.SMTP_FROM || 'Dra. Kaline - Agendamentos <agendamentos@drakaline.com.br>';
+
+  if (pool) {
+    try {
+      await ensureClinicSettingsTable(pool);
+      const [rows]: any = await pool.query(
+        'SELECT setting_key, setting_value FROM clinic_settings WHERE setting_key IN (?, ?, ?, ?, ?, ?, ?)',
+        ['notification_email', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_secure', 'smtp_from']
+      );
+      if (rows && rows.length > 0) {
+        for (const row of rows) {
+          if (row.setting_key === 'notification_email' && row.setting_value) notificationEmail = row.setting_value;
+          if (row.setting_key === 'smtp_host') smtpHost = row.setting_value;
+          if (row.setting_key === 'smtp_port' && row.setting_value) smtpPort = Number(row.setting_value);
+          if (row.setting_key === 'smtp_user') smtpUser = row.setting_value;
+          if (row.setting_key === 'smtp_pass') smtpPass = row.setting_value;
+          if (row.setting_key === 'smtp_secure') smtpSecure = row.setting_value === 'true';
+          if (row.setting_key === 'smtp_from' && row.setting_value) smtpFrom = row.setting_value;
+        }
+      }
+    } catch (e: any) {
+      console.warn('Error reading email settings from MySQL:', e.message);
+    }
+  }
+
+  return {
+    notificationEmail,
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPass,
+    smtpSecure,
+    smtpFrom
+  };
+}
+
+async function sendAppointmentEmailNotification(appointment: {
+  clientName: string;
+  clientPhone: string;
+  clientEmail?: string;
+  procedureTitle?: string;
+  date: string;
+  time: string;
+  notes?: string;
+}): Promise<{ success: boolean; recipient: string; message: string; previewUrl?: string }> {
+  const settings = await getEmailSettings();
+  const recipient = settings.notificationEmail;
+  if (!recipient) {
+    return { success: false, recipient: '', message: 'Nenhum e-mail de notificação configurado.' };
+  }
+
+  const subject = `Novo Agendamento: ${appointment.clientName} - ${appointment.procedureTitle || 'Consulta Médica'}`;
+  
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f7f6f2; margin: 0; padding: 24px 12px; color: #2e2a27; }
+        .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 20px; border: 1px solid #e5e0d8; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }
+        .header { background: #aa907d; padding: 28px 24px; text-align: center; color: #ffffff; }
+        .header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.3px; }
+        .header p { margin: 6px 0 0 0; font-size: 13px; opacity: 0.95; }
+        .content { padding: 28px 24px; }
+        .badge { display: inline-block; background: #f5efe8; color: #826650; font-weight: 700; font-size: 11px; padding: 5px 12px; border-radius: 20px; margin-bottom: 16px; border: 1px solid #dfcfc2; text-transform: uppercase; letter-spacing: 0.5px; }
+        .info-card { background: #faf8f5; border: 1px solid #ece6de; border-radius: 14px; padding: 18px 20px; margin-bottom: 20px; }
+        .info-row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid #f0ece6; font-size: 13.5px; }
+        .info-row:last-child { border-bottom: none; }
+        .label { font-weight: 600; color: #736b63; }
+        .value { font-weight: 700; color: #2e2a27; text-align: right; }
+        .notes-box { background: #fffaf4; border-left: 4px solid #aa907d; padding: 14px 18px; border-radius: 8px; font-size: 13px; color: #524438; margin: 18px 0; line-height: 1.5; }
+        .footer { background: #f7f6f2; padding: 18px 24px; text-align: center; font-size: 11.5px; color: #9c948c; border-top: 1px solid #ece6de; }
+        .btn-whatsapp { display: inline-block; background: #25D366; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 30px; font-weight: 700; font-size: 13px; box-shadow: 0 2px 10px rgba(37,211,102,0.3); }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Dra. Kaline — Saúde & Restauração Capilar</h1>
+          <p>Notificação de Novo Agendamento de Consulta</p>
+        </div>
+        <div class="content">
+          <div class="badge">Novo Agendamento Confirmado no Site</div>
+          <p style="font-size: 14.5px; line-height: 1.6; margin: 0 0 18px 0;">
+            Um novo paciente solicitou pré-agendamento de consulta. Seguem as informações completas para contato e organização da agenda:
+          </p>
+
+          <div class="info-card">
+            <div class="info-row">
+              <span class="label">Paciente:</span>
+              <span class="value">${appointment.clientName}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Procedimento:</span>
+              <span class="value" style="color: #aa907d;">${appointment.procedureTitle || 'Consulta Médica'}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Data Solicitada:</span>
+              <span class="value">📅 ${appointment.date}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Horário:</span>
+              <span class="value">⏰ ${appointment.time}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Telefone / WhatsApp:</span>
+              <span class="value">📞 ${appointment.clientPhone}</span>
+            </div>
+            ${appointment.clientEmail ? `
+            <div class="info-row">
+              <span class="label">E-mail:</span>
+              <span class="value">✉️ ${appointment.clientEmail}</span>
+            </div>` : ''}
+          </div>
+
+          ${appointment.notes ? `
+          <div class="notes-box">
+            <strong>Observações / Queixa do Paciente:</strong><br/>
+            "${appointment.notes}"
+          </div>` : ''}
+
+          <div style="text-align: center; margin: 24px 0 10px 0;">
+            <a href="https://wa.me/${appointment.clientPhone.replace(/\\D/g, '')}" class="btn-whatsapp" target="_blank">
+              Iniciar Atendimento no WhatsApp
+            </a>
+          </div>
+        </div>
+        <div class="footer">
+          Mensagem gerada e transmitida automaticamente pelo sistema clínico Dra. Kaline &copy; ${new Date().getFullYear()}
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const textContent = `
+NOVO AGENDAMENTO RECEBIDO - Dra. Kaline Saúde & Restauração Capilar
+
+Paciente: ${appointment.clientName}
+Procedimento: ${appointment.procedureTitle || 'Consulta Médica'}
+Data: ${appointment.date}
+Horário: ${appointment.time}
+WhatsApp / Telefone: ${appointment.clientPhone}
+E-mail: ${appointment.clientEmail || 'Não informado'}
+Observações: ${appointment.notes || 'Nenhuma'}
+
+Enviado automaticamente pelo sistema clínico.
+  `.trim();
+
+  try {
+    let transporter: any;
+    if (settings.smtpHost && settings.smtpUser) {
+      transporter = nodemailer.createTransport({
+        host: settings.smtpHost,
+        port: settings.smtpPort || 587,
+        secure: settings.smtpSecure || settings.smtpPort === 465,
+        auth: {
+          user: settings.smtpUser,
+          pass: settings.smtpPass || ''
+        },
+        tls: {
+          rejectUnauthorized: false
+        }
+      });
+    } else {
+      // Direct transporter fallback
+      try {
+        const testAccount = await nodemailer.createTestAccount();
+        transporter = nodemailer.createTransport({
+          host: 'smtp.ethereal.email',
+          port: 587,
+          secure: false,
+          auth: {
+            user: testAccount.user,
+            pass: testAccount.pass
+          }
+        });
+      } catch (_) {
+        transporter = nodemailer.createTransport({
+          jsonTransport: true
+        });
+      }
+    }
+
+    const info = await transporter.sendMail({
+      from: settings.smtpFrom || `"Dra. Kaline Agendamentos" <no-reply@drakaline.com.br>`,
+      to: recipient,
+      subject,
+      text: textContent,
+      html: htmlContent
+    });
+
+    const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;
+    console.log(`[EMAIL DISPATCH SUCCESS] Appointment notification sent to: ${recipient}. MessageId: ${info.messageId}`);
+    if (previewUrl) {
+      console.log(`[EMAIL PREVIEW URL]: ${previewUrl}`);
+    }
+
+    return {
+      success: true,
+      recipient,
+      message: `E-mail enviado com sucesso para ${recipient}`,
+      previewUrl: previewUrl ? String(previewUrl) : undefined
+    };
+  } catch (err: any) {
+    console.error(`[EMAIL DISPATCH ERROR] Failed to send email to ${recipient}:`, err.message);
+    return {
+      success: false,
+      recipient,
+      message: `Erro ao enviar e-mail: ${err.message}`
+    };
+  }
+}
+
 app.post('/api/appointments', async (req, res) => {
   const { id, clientName, clientPhone, clientEmail, procedureId, procedureTitle, date, time, notes, status } = req.body;
   if (!clientName || !clientPhone || !date || !time) {
@@ -495,6 +731,17 @@ app.post('/api/appointments', async (req, res) => {
       await ensureNotificationsTable(pool);
       await ensureClientsTable(pool);
 
+      // Conflict verification: prevent booking the same time slot if already taken and not cancelled
+      const [conflicts]: any = await pool.query(
+        'SELECT id, client_name FROM appointments WHERE appointment_date = ? AND appointment_time = ? AND status != "cancelado" AND id != ? LIMIT 1',
+        [date, time, appointmentId]
+      );
+      if (conflicts && conflicts.length > 0) {
+        return res.status(409).json({
+          error: `O horário das ${time} no dia ${date} já está reservado para outro paciente. Por favor, escolha outro horário disponível.`
+        });
+      }
+
       await pool.query(
         `INSERT INTO appointments (id, client_name, client_phone, client_email, procedure_id, procedure_title, appointment_date, appointment_time, notes, status, reminder_sent)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false)
@@ -509,20 +756,6 @@ app.post('/api/appointments', async (req, res) => {
            notes = VALUES(notes),
            status = VALUES(status)`,
         [appointmentId, clientName, clientPhone, clientEmail || '', procedureId || '', procedureTitle || 'Consulta Médica Capilar', date, time, notes || '', aptStatus]
-      );
-
-      // Create notification
-      const notifId = 'notif-' + Date.now();
-      await pool.query(
-        `INSERT INTO notifications (id, title, message, timestamp, is_read, type, appointment_id)
-         VALUES (?, ?, ?, ?, false, 'appointment', ?)`,
-        [
-          notifId,
-          'Novo Agendamento Recebido',
-          `${clientName} agendou para ${date} às ${time} (${procedureTitle || 'Consulta Capilar'}).`,
-          new Date().toISOString(),
-          appointmentId
-        ]
       );
 
       // Auto-register or link client in clients table in MySQL
@@ -559,6 +792,17 @@ app.post('/api/appointments', async (req, res) => {
     }
   }
 
+  // If MySQL was not available, check conflict in local cache
+  if (!pool) {
+    const currentLocal = readLocalAppointments();
+    const conflict = currentLocal.find(a => a.date === date && a.time === time && a.status !== 'cancelado' && a.id !== appointmentId);
+    if (conflict) {
+      return res.status(409).json({
+        error: `O horário das ${time} no dia ${date} já está reservado para outro paciente. Por favor, escolha outro horário disponível.`
+      });
+    }
+  }
+
   // Update local file cache
   const currentLocal = readLocalAppointments();
   const existingIdx = currentLocal.findIndex(a => a.id === appointmentId);
@@ -569,9 +813,19 @@ app.post('/api/appointments', async (req, res) => {
   }
   writeLocalAppointments(currentLocal);
 
+  // Send appointment email notification to configured administrator email
+  let emailDispatch = { success: false, recipient: '', message: 'Iniciando envio' };
+  try {
+    emailDispatch = await sendAppointmentEmailNotification(appointmentObj);
+  } catch (emailErr: any) {
+    console.error('Error during appointment email dispatch:', emailErr);
+    emailDispatch = { success: false, recipient: '', message: emailErr.message };
+  }
+
   res.json({
     status: 'success',
-    appointment: appointmentObj
+    appointment: appointmentObj,
+    emailNotification: emailDispatch
   });
 });
 
@@ -1712,6 +1966,596 @@ app.put('/api/settings/address', async (req, res) => {
   }
 
   res.json({ status: 'success', address, city, cep, fullAddress, mapsUrl });
+});
+
+// ----------------------------------------------------
+// GET & POST Email Settings (Destinatário de Agendamentos & SMTP)
+// ----------------------------------------------------
+app.get('/api/settings/email', async (req, res) => {
+  try {
+    const settings = await getEmailSettings();
+    res.json({
+      notificationEmail: settings.notificationEmail,
+      smtpHost: settings.smtpHost,
+      smtpPort: settings.smtpPort,
+      smtpUser: settings.smtpUser,
+      smtpPass: settings.smtpPass ? '••••••••' : '',
+      hasPassword: Boolean(settings.smtpPass),
+      smtpSecure: settings.smtpSecure,
+      smtpFrom: settings.smtpFrom
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/settings/email', async (req, res) => {
+  const { notificationEmail, smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure, smtpFrom } = req.body;
+  if (!notificationEmail) {
+    return res.status(400).json({ error: 'O e-mail para recebimento de agendamentos é obrigatório.' });
+  }
+
+  const cleanEmail = String(notificationEmail).trim();
+  const pool = getMySqlPool();
+  const local = getLocalClinicSettings();
+
+  local['notification_email'] = cleanEmail;
+  if (smtpHost !== undefined) local['smtp_host'] = String(smtpHost).trim();
+  if (smtpPort !== undefined) local['smtp_port'] = String(smtpPort).trim();
+  if (smtpUser !== undefined) local['smtp_user'] = String(smtpUser).trim();
+  if (smtpPass !== undefined && smtpPass !== '••••••••' && smtpPass !== '') {
+    local['smtp_pass'] = String(smtpPass);
+  }
+  if (smtpSecure !== undefined) local['smtp_secure'] = String(smtpSecure);
+  if (smtpFrom !== undefined) local['smtp_from'] = String(smtpFrom).trim();
+
+  saveLocalClinicSettings(local);
+
+  if (pool) {
+    try {
+      await ensureClinicSettingsTable(pool);
+      const updates: [string, string][] = [
+        ['notification_email', cleanEmail]
+      ];
+      if (smtpHost !== undefined) updates.push(['smtp_host', String(smtpHost).trim()]);
+      if (smtpPort !== undefined) updates.push(['smtp_port', String(smtpPort).trim()]);
+      if (smtpUser !== undefined) updates.push(['smtp_user', String(smtpUser).trim()]);
+      if (smtpPass !== undefined && smtpPass !== '••••••••' && smtpPass !== '') {
+        updates.push(['smtp_pass', String(smtpPass)]);
+      }
+      if (smtpSecure !== undefined) updates.push(['smtp_secure', String(smtpSecure)]);
+      if (smtpFrom !== undefined) updates.push(['smtp_from', String(smtpFrom).trim()]);
+
+      for (const [k, v] of updates) {
+        await pool.query(
+          'INSERT INTO clinic_settings (setting_key, setting_value, updated_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()',
+          [k, v]
+        );
+      }
+    } catch (err: any) {
+      console.error('Error saving email settings in MySQL:', err);
+    }
+  }
+
+  res.json({
+    status: 'success',
+    notificationEmail: cleanEmail,
+    message: 'Configurações de e-mail salvas com sucesso no banco de dados!'
+  });
+});
+
+app.post('/api/settings/email/test', async (req, res) => {
+  const { targetEmail } = req.body;
+  const currentSettings = await getEmailSettings();
+  const recipient = targetEmail || currentSettings.notificationEmail;
+
+  if (!recipient) {
+    return res.status(400).json({ error: 'Nenhum endereço de e-mail informado para o teste.' });
+  }
+
+  const testData = {
+    clientName: 'Teste de Agendamento (Sistema Clínico)',
+    clientPhone: '(11) 99999-8888',
+    clientEmail: recipient,
+    procedureTitle: 'Tricoscopia Digital & Avaliação Capilar (Teste)',
+    date: new Date().toISOString().split('T')[0],
+    time: '14:30',
+    notes: 'Esta é uma mensagem de teste enviada pelo painel administrativo para verificar a entrega de notificações de agendamento por e-mail.'
+  };
+
+  try {
+    const result = await sendAppointmentEmailNotification(testData);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/appointments/:id/resend-email', async (req, res) => {
+  const { id } = req.params;
+  const pool = getMySqlPool();
+  let appointmentData: any = null;
+
+  if (pool) {
+    try {
+      await ensureAppointmentsTable(pool);
+      const [rows]: any = await pool.query('SELECT * FROM appointments WHERE id = ?', [id]);
+      if (rows && rows.length > 0) {
+        const r = rows[0];
+        appointmentData = {
+          clientName: r.client_name,
+          clientPhone: r.client_phone,
+          clientEmail: r.client_email,
+          procedureTitle: r.procedure_title,
+          date: r.appointment_date,
+          time: r.appointment_time,
+          notes: r.notes
+        };
+      }
+    } catch (e: any) {
+      console.warn('Error fetching appointment for email resend:', e.message);
+    }
+  }
+
+  if (!appointmentData) {
+    const local = readLocalAppointments();
+    const item = local.find(a => a.id === id);
+    if (item) {
+      appointmentData = {
+        clientName: item.clientName,
+        clientPhone: item.clientPhone,
+        clientEmail: item.clientEmail,
+        procedureTitle: item.procedureTitle,
+        date: item.date,
+        time: item.time,
+        notes: item.notes
+      };
+    }
+  }
+
+  if (!appointmentData) {
+    return res.status(404).json({ error: 'Agendamento não encontrado.' });
+  }
+
+  try {
+    const result = await sendAppointmentEmailNotification(appointmentData);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------------------------------------------
+// Doctor Schedules & Clinic Availability API (MySQL)
+// ----------------------------------------------------
+const SCHEDULES_FILE = path.join(DATA_DIR, 'doctor_schedules.json');
+
+interface LocalSchedule {
+  id: string;
+  date: string;
+  time: string;
+  clinicName: string;
+  isAvailable: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+function readLocalSchedules(): LocalSchedule[] {
+  try {
+    if (fs.existsSync(SCHEDULES_FILE)) {
+      return JSON.parse(fs.readFileSync(SCHEDULES_FILE, 'utf-8'));
+    }
+  } catch (e) {
+    console.warn('Error reading local schedules file', e);
+  }
+  return [];
+}
+
+function writeLocalSchedules(schedules: LocalSchedule[]) {
+  try {
+    fs.writeFileSync(SCHEDULES_FILE, JSON.stringify(schedules, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Error writing local schedules file', e);
+  }
+}
+
+let schedulesTableEnsured = false;
+async function ensureDoctorSchedulesTable(pool: any) {
+  if (schedulesTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS doctor_schedules (
+        id VARCHAR(64) PRIMARY KEY,
+        schedule_date VARCHAR(30) NOT NULL,
+        schedule_time VARCHAR(20) NOT NULL,
+        clinic_name VARCHAR(255) NOT NULL,
+        is_available TINYINT(1) DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_sched_dt (schedule_date, schedule_time),
+        INDEX idx_sched_date (schedule_date)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // Check if table has records; if 0, auto-seed upcoming 14 days (weekdays)
+    const [rows]: any = await pool.query('SELECT COUNT(*) as count FROM doctor_schedules');
+    if (rows && rows[0] && Number(rows[0].count) === 0) {
+      console.log('Seeding initial doctor schedules in MySQL...');
+      const defaultTimes = ['09:00', '10:00', '11:15', '14:00', '15:30', '16:45', '18:00'];
+      const defaultClinic = 'Clínica Principal - Jardins & Vila Olímpia';
+      const today = new Date();
+
+      for (let i = 1; i <= 14; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() + i);
+        const dayOfWeek = d.getDay();
+        if (dayOfWeek === 0) continue; // Pular domingo
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${yyyy}-${mm}-${dd}`;
+        const clinic = dayOfWeek === 6 ? 'Unidade Alphaville (Sábado)' : defaultClinic;
+        const times = dayOfWeek === 6 ? ['09:00', '10:00', '11:00', '12:00'] : defaultTimes;
+
+        for (const t of times) {
+          const id = 'sch-' + dateStr + '-' + t.replace(':', '');
+          await pool.query(
+            `INSERT IGNORE INTO doctor_schedules (id, schedule_date, schedule_time, clinic_name, is_available)
+             VALUES (?, ?, ?, ?, 1)`,
+            [id, dateStr, t, clinic]
+          );
+        }
+      }
+    }
+
+    schedulesTableEnsured = true;
+  } catch (err: any) {
+    console.warn('Could not ensure doctor_schedules table:', err.message);
+  }
+}
+
+// GET /api/schedules - list doctor's agenda with live booking status from appointments
+app.get('/api/schedules', async (req, res) => {
+  const { date, startDate, endDate } = req.query;
+  const pool = getMySqlPool();
+  let schedules: any[] = [];
+
+  if (pool) {
+    try {
+      await ensureDoctorSchedulesTable(pool);
+      await ensureAppointmentsTable(pool);
+
+      let query = `
+        SELECT 
+          s.id,
+          s.schedule_date as date,
+          s.schedule_time as time,
+          s.clinic_name as clinicName,
+          s.is_available as isAvailable,
+          s.created_at as createdAt,
+          a.id as appointmentId,
+          a.client_name as bookedByName,
+          a.client_phone as bookedByPhone,
+          a.status as appointmentStatus
+        FROM doctor_schedules s
+        LEFT JOIN appointments a ON a.appointment_date = s.schedule_date 
+                                AND a.appointment_time = s.schedule_time 
+                                AND a.status != 'cancelado'
+      `;
+      const params: any[] = [];
+
+      if (date) {
+        query += ' WHERE s.schedule_date = ?';
+        params.push(String(date));
+      } else if (startDate && endDate) {
+        query += ' WHERE s.schedule_date BETWEEN ? AND ?';
+        params.push(String(startDate), String(endDate));
+      }
+
+      query += ' ORDER BY s.schedule_date ASC, s.schedule_time ASC';
+
+      const [rows]: any = await pool.query(query, params);
+      schedules = (rows || []).map((r: any) => ({
+        id: r.id,
+        date: r.date,
+        time: r.time,
+        clinicName: r.clinicName,
+        isAvailable: Boolean(r.isAvailable),
+        isBooked: Boolean(r.appointmentId && r.appointmentStatus !== 'cancelado'),
+        bookedByName: r.appointmentStatus !== 'cancelado' ? r.bookedByName : null,
+        bookedByPhone: r.appointmentStatus !== 'cancelado' ? r.bookedByPhone : null,
+        appointmentId: r.appointmentStatus !== 'cancelado' ? r.appointmentId : null,
+        appointmentStatus: r.appointmentStatus || null,
+        createdAt: r.createdAt
+      }));
+    } catch (e: any) {
+      console.warn('Error fetching schedules from MySQL, fallback to local:', e.message);
+    }
+  }
+
+  if (schedules.length === 0) {
+    const local = readLocalSchedules();
+    const apts = readLocalAppointments();
+    schedules = local
+      .filter(s => {
+        if (date) return s.date === date;
+        if (startDate && endDate) return s.date >= startDate && s.date <= endDate;
+        return true;
+      })
+      .map(s => {
+        const apt = apts.find(a => a.date === s.date && a.time === s.time && a.status !== 'cancelado');
+        return {
+          id: s.id,
+          date: s.date,
+          time: s.time,
+          clinicName: s.clinicName,
+          isAvailable: Boolean(s.isAvailable),
+          isBooked: Boolean(apt),
+          bookedByName: apt?.clientName || null,
+          bookedByPhone: apt?.clientPhone || null,
+          appointmentId: apt?.id || null,
+          appointmentStatus: apt?.status || null
+        };
+      })
+      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+  }
+
+  res.json(schedules);
+});
+
+// GET /api/schedules/available - For client booking (shows available times and clinic for a date)
+app.get('/api/schedules/available', async (req, res) => {
+  const { date } = req.query;
+  if (!date) {
+    return res.status(400).json({ error: 'Data não informada' });
+  }
+
+  const pool = getMySqlPool();
+  let slots: any[] = [];
+  let clinicName = 'Clínica Principal - Dra. Kaline';
+
+  if (pool) {
+    try {
+      await ensureDoctorSchedulesTable(pool);
+      await ensureAppointmentsTable(pool);
+
+      // Fetch doctor schedules for this date
+      const [rows]: any = await pool.query(
+        `SELECT 
+          s.id,
+          s.schedule_date as date,
+          s.schedule_time as time,
+          s.clinic_name as clinicName,
+          s.is_available as isAvailable,
+          a.id as appointmentId,
+          a.status as appointmentStatus
+        FROM doctor_schedules s
+        LEFT JOIN appointments a ON a.appointment_date = s.schedule_date 
+                                AND a.appointment_time = s.schedule_time 
+                                AND a.status != 'cancelado'
+        WHERE s.schedule_date = ? AND s.is_available = 1
+        ORDER BY s.schedule_time ASC`,
+        [date]
+      );
+
+      if (rows && rows.length > 0) {
+        clinicName = rows[0].clinicName;
+        slots = rows.map((r: any) => ({
+          time: r.time,
+          isBooked: Boolean(r.appointmentId && r.appointmentStatus !== 'cancelado'),
+          clinicName: r.clinicName
+        }));
+      }
+    } catch (e: any) {
+      console.warn('Error fetching available schedules from MySQL:', e.message);
+    }
+  }
+
+  // Fallback or default slots if doctor has not created explicit slots for this date
+  if (slots.length === 0) {
+    const local = readLocalSchedules().filter(s => s.date === date && s.isAvailable);
+    const localApts = readLocalAppointments();
+
+    if (local.length > 0) {
+      clinicName = local[0].clinicName;
+      slots = local.map(s => {
+        const apt = localApts.find(a => a.date === s.date && a.time === s.time && a.status !== 'cancelado');
+        return {
+          time: s.time,
+          isBooked: Boolean(apt),
+          clinicName: s.clinicName
+        };
+      });
+    } else {
+      // Default standard clinic hours
+      const defaultTimes = ['09:00', '10:00', '11:15', '14:00', '15:30', '16:45', '18:00'];
+      slots = defaultTimes.map(t => {
+        const apt = localApts.find(a => a.date === date && a.time === t && a.status !== 'cancelado');
+        return {
+          time: t,
+          isBooked: Boolean(apt),
+          clinicName
+        };
+      });
+    }
+  }
+
+  res.json({
+    date,
+    clinicName,
+    slots
+  });
+});
+
+// POST /api/schedules - create or update a single slot
+app.post('/api/schedules', async (req, res) => {
+  const { date, time, clinicName, isAvailable } = req.body;
+  if (!date || !time || !clinicName) {
+    return res.status(400).json({ error: 'Data, horário e clínica são obrigatórios.' });
+  }
+
+  const id = 'sch-' + date + '-' + String(time).replace(':', '');
+  const pool = getMySqlPool();
+
+  if (pool) {
+    try {
+      await ensureDoctorSchedulesTable(pool);
+      await pool.query(
+        `INSERT INTO doctor_schedules (id, schedule_date, schedule_time, clinic_name, is_available)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           clinic_name = VALUES(clinic_name),
+           is_available = VALUES(is_available),
+           updated_at = NOW()`,
+        [id, date, time, clinicName, isAvailable !== false ? 1 : 0]
+      );
+    } catch (e: any) {
+      console.error('Error saving schedule in MySQL:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  const local = readLocalSchedules();
+  const idx = local.findIndex(s => s.date === date && s.time === time);
+  const newObj: LocalSchedule = {
+    id,
+    date,
+    time,
+    clinicName,
+    isAvailable: isAvailable !== false,
+    updatedAt: new Date().toISOString()
+  };
+  if (idx >= 0) {
+    local[idx] = newObj;
+  } else {
+    local.push(newObj);
+  }
+  writeLocalSchedules(local);
+
+  res.json({ status: 'success', schedule: newObj });
+});
+
+// POST /api/schedules/batch - batch create weekly schedule
+app.post('/api/schedules/batch', async (req, res) => {
+  const { dates, times, clinicName } = req.body;
+  if (!Array.isArray(dates) || !Array.isArray(times) || !clinicName) {
+    return res.status(400).json({ error: 'Formato inválido. Informe array de datas, horários e o nome da clínica.' });
+  }
+
+  const pool = getMySqlPool();
+  const added: any[] = [];
+
+  if (pool) {
+    try {
+      await ensureDoctorSchedulesTable(pool);
+      for (const d of dates) {
+        for (const t of times) {
+          const id = 'sch-' + d + '-' + String(t).replace(':', '');
+          await pool.query(
+            `INSERT INTO doctor_schedules (id, schedule_date, schedule_time, clinic_name, is_available)
+             VALUES (?, ?, ?, ?, 1)
+             ON DUPLICATE KEY UPDATE
+               clinic_name = VALUES(clinic_name),
+               is_available = 1,
+               updated_at = NOW()`,
+            [id, d, t, clinicName]
+          );
+          added.push({ id, date: d, time: t, clinicName, isAvailable: true });
+        }
+      }
+    } catch (e: any) {
+      console.error('Error batch saving schedules in MySQL:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  const local = readLocalSchedules();
+  for (const item of added) {
+    const idx = local.findIndex(s => s.date === item.date && s.time === item.time);
+    if (idx >= 0) {
+      local[idx] = item;
+    } else {
+      local.push(item);
+    }
+  }
+  writeLocalSchedules(local);
+
+  res.json({ status: 'success', count: added.length });
+});
+
+// DELETE /api/schedules/:id - delete a slot
+app.delete('/api/schedules/:id', async (req, res) => {
+  const { id } = req.params;
+  const pool = getMySqlPool();
+
+  if (pool) {
+    try {
+      await ensureDoctorSchedulesTable(pool);
+      await pool.query('DELETE FROM doctor_schedules WHERE id = ?', [id]);
+    } catch (e: any) {
+      console.error('Error deleting schedule in MySQL:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  const local = readLocalSchedules().filter(s => s.id !== id);
+  writeLocalSchedules(local);
+
+  res.json({ status: 'success' });
+});
+
+// DELETE /api/schedules/date/:date - delete all slots for a specific date
+app.delete('/api/schedules/date/:date', async (req, res) => {
+  const { date } = req.params;
+  const pool = getMySqlPool();
+
+  if (pool) {
+    try {
+      await ensureDoctorSchedulesTable(pool);
+      await pool.query('DELETE FROM doctor_schedules WHERE schedule_date = ?', [date]);
+    } catch (e: any) {
+      console.error('Error deleting date schedules in MySQL:', e);
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  const local = readLocalSchedules().filter(s => s.date !== date);
+  writeLocalSchedules(local);
+
+  res.json({ status: 'success' });
+});
+
+// PATCH /api/schedules/:id/toggle - toggle availability
+app.patch('/api/schedules/:id/toggle', async (req, res) => {
+  const { id } = req.params;
+  const pool = getMySqlPool();
+  let newStatus = true;
+
+  if (pool) {
+    try {
+      await ensureDoctorSchedulesTable(pool);
+      await pool.query(
+        'UPDATE doctor_schedules SET is_available = NOT is_available, updated_at = NOW() WHERE id = ?',
+        [id]
+      );
+      const [rows]: any = await pool.query('SELECT is_available FROM doctor_schedules WHERE id = ?', [id]);
+      if (rows && rows.length > 0) {
+        newStatus = Boolean(rows[0].is_available);
+      }
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  const local = readLocalSchedules();
+  const item = local.find(s => s.id === id);
+  if (item) {
+    item.isAvailable = !item.isAvailable;
+    newStatus = item.isAvailable;
+    writeLocalSchedules(local);
+  }
+
+  res.json({ status: 'success', isAvailable: newStatus });
 });
 
 // ----------------------------------------------------

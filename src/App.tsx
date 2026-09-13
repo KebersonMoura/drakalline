@@ -8,7 +8,6 @@ import { TestimonialsSection } from './components/TestimonialsSection';
 import { Footer } from './components/Footer';
 import { WhatsAppFloatingButton } from './components/WhatsAppFloatingButton';
 import { QuickBookingModal } from './components/QuickBookingModal';
-import { PushNotificationManager } from './components/PushNotificationManager';
 import { AdminPanel } from './components/AdminPanel';
 import { storageService } from './services/storageService';
 import { Procedure, InstagramPost } from './types';
@@ -16,19 +15,15 @@ import { Procedure, InstagramPost } from './types';
 export default function App() {
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [selectedProcedureForBooking, setSelectedProcedureForBooking] = useState<string>('tricoscopia-digital');
 
   // Dynamic datasets from storageService
   const [procedures, setProcedures] = useState<Procedure[]>([]);
   const [gallery, setGallery] = useState<InstagramPost[]>([]);
-  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
 
   const refreshData = () => {
     setProcedures(storageService.getProcedures());
     setGallery(storageService.getGallery());
-    const notifs = storageService.getNotifications();
-    setUnreadNotificationsCount(notifs.filter(n => !n.read).length);
   };
 
   useEffect(() => {
@@ -74,8 +69,6 @@ export default function App() {
       <Navbar
         onOpenBooking={() => handleOpenBooking()}
         onOpenAdmin={() => setIsAdminOpen(true)}
-        onOpenNotifications={() => setIsNotificationsOpen(true)}
-        unreadNotificationsCount={unreadNotificationsCount}
       />
 
       {/* Main Streamlined Sections */}
@@ -110,12 +103,6 @@ export default function App() {
         onBookingComplete={() => {
           refreshData();
         }}
-      />
-
-      <PushNotificationManager
-        isOpen={isNotificationsOpen}
-        onClose={() => setIsNotificationsOpen(false)}
-        onNotificationsUpdated={() => refreshData()}
       />
 
       <AdminPanel

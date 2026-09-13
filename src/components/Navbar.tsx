@@ -3,7 +3,6 @@ import {
   Calendar, 
   MessageCircle, 
   Instagram, 
-  Bell, 
   Menu, 
   X, 
   Lock
@@ -14,15 +13,11 @@ import { storageService } from '../services/storageService';
 interface NavbarProps {
   onOpenBooking: () => void;
   onOpenAdmin: () => void;
-  onOpenNotifications: () => void;
-  unreadNotificationsCount: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenBooking,
-  onOpenAdmin,
-  onOpenNotifications,
-  unreadNotificationsCount
+  onOpenAdmin
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -130,20 +125,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Instagram className="w-4 h-4" />
             </a>
 
-            {/* Notification Bell */}
-            <button
-              onClick={onOpenNotifications}
-              title="Lembretes e Avisos"
-              className="relative p-2 text-[#655d56] hover:text-[#aa907d] hover:bg-[#c9bcad]/30 rounded-full transition-colors cursor-pointer"
-            >
-              <Bell className="w-4 h-4" />
-              {unreadNotificationsCount > 0 && (
-                <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-[#aa907d] text-[9px] font-bold text-white rounded-full flex items-center justify-center">
-                  {unreadNotificationsCount}
-                </span>
-              )}
-            </button>
-
             {/* WhatsApp Direct Action Button with Original WhatsApp Green */}
             <a
               href={whatsappUrl}
@@ -177,16 +158,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Mobile Menu Toggle */}
           <div className="flex sm:hidden items-center space-x-1">
-            <button
-              onClick={onOpenNotifications}
-              className="relative p-2 text-[#3b3530]"
-            >
-              <Bell className="w-4 h-4" />
-              {unreadNotificationsCount > 0 && (
-                <span className="absolute top-1 right-1 w-2 h-2 bg-[#aa907d] rounded-full" />
-              )}
-            </button>
-
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-[#3b3530] hover:bg-[#c9bcad]/30 rounded-lg"
